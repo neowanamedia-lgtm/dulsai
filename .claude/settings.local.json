@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Rename-Item *)"
+      "PowerShell(Rename-Item *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(Get-ChildItem -Path 'C:\\\\Projects\\\\dulsai\\\\assets' -Force | Sort-Object LastWriteTime -Descending | ForEach-Object { \"$\\($_.LastWriteTime.ToString\\('yyyy-MM-dd HH:mm:ss'\\)\\)  $\\($_.Length.ToString\\(\\).PadLeft\\(8\\)\\)  $\\($_.Name\\)\" })",
+      "PowerShell(py *)"
     ]
   }
 }
