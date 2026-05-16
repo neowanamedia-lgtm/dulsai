@@ -5,6 +5,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -17,6 +18,8 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+
+import * as ImagePicker from 'expo-image-picker';
 
 import {
   SEED_CONVERSATIONS,
@@ -166,7 +169,12 @@ const CATEGORIES: Category[] = [
 ];
 
 type TextSizeStep = 0 | 1 | 2 | 3;
-type Route = 'main' | 'category' | 'post' | 'profile' | 'conversation';
+type Route =
+  | 'main'
+  | 'category'
+  | 'post'
+  | 'profile'
+  | 'conversation';
 
 const PALETTE = {
   bg: '#141210',
@@ -446,6 +454,7 @@ export default function App() {
     setRoute('profile');
   };
 
+
   const openConversation = (postId: string, rootCommentId: string) => {
     const existing = findConversation(postId, rootCommentId);
     if (existing) {
@@ -524,11 +533,11 @@ export default function App() {
         />
       )}
       {route === 'profile' && (
-        <ProfileScreen
+        <ProfileSetupScreen
           scale={scale}
           textSizeStep={textSizeStep}
           onChangeTextSize={changeTextSize}
-          onClose={goBack}
+          onBack={goBack}
         />
       )}
     </View>
@@ -1011,48 +1020,6 @@ function JoinBlock({
   );
 }
 
-function ProfileScreen({
-  scale,
-  textSizeStep,
-  onChangeTextSize,
-  onClose,
-}: {
-  scale: number;
-  textSizeStep: TextSizeStep;
-  onChangeTextSize: (delta: number) => void;
-  onClose: () => void;
-}) {
-  const styles = useMemo(() => createProfileStyles(scale), [scale]);
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <BrandHeader />
-
-      <ScrollView
-        style={styles.scrollFlex}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}
-      >
-        <Text style={styles.sectionLabel}>프로필 정보</Text>
-        <Text style={styles.sectionPlaceholder}>
-          곧 닉네임·연령대·소개 같은 항목이 이 자리에 채워질 예정입니다.
-        </Text>
-
-        <View style={styles.sectionDivider} />
-
-        <Text style={styles.sectionLabel}>계정</Text>
-        <Text style={styles.sectionPlaceholder}>
-          곧 계정 관리·로그아웃 같은 항목이 이 자리에 채워질 예정입니다.
-        </Text>
-      </ScrollView>
-
-      <View style={bottomBarStyles.bar}>
-        <SizeButtons textSizeStep={textSizeStep} onChangeTextSize={onChangeTextSize} />
-        <NavButton position="right" onPress={onClose} icon="←" />
-      </View>
-    </SafeAreaView>
-  );
-}
 
 function ConversationScreen({
   scale,
@@ -1364,6 +1331,1147 @@ function ConversationScreen({
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+const PROFILE_REGION_OPTIONS = [
+  '서울',
+  '경기·인천',
+  '부산',
+  '대구',
+  '대전·충청',
+  '광주·전라',
+  '그 외',
+] as const;
+
+const PROFILE_LANGUAGE_OPTIONS: ReadonlyArray<{ code: string; label: string }> = [
+  { code: 'ko', label: '한국어' },
+  { code: 'en', label: 'English' },
+  { code: 'ja', label: '日本語' },
+  { code: 'zh', label: '中文' },
+  { code: 'es', label: 'Español' },
+];
+
+const PROFILE_COUNTRY_OPTIONS: ReadonlyArray<{
+  code: string;
+  label: string;
+}> = [
+  { code: '+82', label: '대한민국 +82' },
+  { code: '+1', label: 'United States +1' },
+  { code: '+81', label: '日本 +81' },
+  { code: '+86', label: '中国 +86' },
+  { code: '+34', label: 'España +34' },
+  { code: 'custom', label: '그 외' },
+];
+
+const PROFILE_OCCUPATION_OPTIONS = [
+  '사무직',
+  '전문직',
+  '자영업',
+  '학생',
+  'IT/기술',
+  '서비스직',
+  '의료/보건',
+  '교육',
+  '예술/문화',
+  '공무원',
+  '프리랜서',
+  '그 외',
+] as const;
+
+function ProfileSetupScreen({
+  scale,
+  textSizeStep,
+  onChangeTextSize,
+  onBack,
+}: {
+  scale: number;
+  textSizeStep: TextSizeStep;
+  onChangeTextSize: (delta: number) => void;
+  onBack: () => void;
+}) {
+  const styles = useMemo(() => createProfileSetupStyles(scale), [scale]);
+  const [nickname, setNickname] = useState('');
+  const [countryCode, setCountryCode] = useState('+82');
+  const [customCountryCode, setCustomCountryCode] = useState('');
+  const [customCountryEditing, setCustomCountryEditing] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const effectiveCountryCode =
+    countryCode === 'custom' ? customCountryCode : countryCode;
+  const sanitizedCountry = effectiveCountryCode.replace(/[^+\d]/g, '');
+  const sanitizedPhone = phoneNumber.replace(/\D/g, '');
+  const fullPhoneNumber = `${sanitizedCountry}${sanitizedPhone}`;
+  const handleCustomCountryChange = (v: string) => {
+    const digits = v.replace(/\D/g, '');
+    setCustomCountryCode(digits ? `+${digits}` : '');
+  };
+  const [code, setCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
+  const [birthdate, setBirthdate] = useState('');
+  const [gender, setGender] = useState<'male' | 'female' | null>(null);
+  const [region, setRegion] = useState<string | null>(null);
+  const [language, setLanguage] = useState<string | null>(null);
+  const [occupation, setOccupation] = useState<string | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<
+    | 'country'
+    | 'language'
+    | 'gender'
+    | 'region'
+    | 'occupation'
+    | 'convList'
+    | null
+  >(null);
+  const toggleDropdown = (
+    key:
+      | 'country'
+      | 'language'
+      | 'gender'
+      | 'region'
+      | 'occupation'
+      | 'convList',
+  ) => setOpenDropdown((prev) => (prev === key ? null : key));
+  const [profileImages, setProfileImages] = useState<(string | null)[]>([
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [removedConvIds, setRemovedConvIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent =
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () =>
+      setKeyboardVisible(true),
+    );
+    const hideSub = Keyboard.addListener(hideEvent, () =>
+      setKeyboardVisible(false),
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const handleSendCode = () => {
+    if (
+      sanitizedCountry.length < 2 ||
+      !sanitizedCountry.startsWith('+') ||
+      sanitizedPhone.length < 7
+    ) {
+      Alert.alert('확인', '국가번호와 휴대폰 번호를 다시 확인해주세요.');
+      return;
+    }
+    setCodeSent(true);
+    Alert.alert(
+      '인증번호 전송',
+      `${fullPhoneNumber} 로 인증번호가 발송되었어요.`,
+    );
+  };
+
+  const handleVerifyCode = () => {
+    if (code.trim().length < 4) {
+      Alert.alert('확인', '인증번호를 다시 확인해주세요.');
+      return;
+    }
+    setIsVerified(true);
+  };
+
+  const handlePhotoSlot = async (idx: number) => {
+    const existing = profileImages[idx];
+    if (existing) {
+      setPreviewImage(existing);
+      return;
+    }
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert('권한 필요', '사진 접근 권한을 허용해주세요.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const uri = result.assets[0].uri;
+      setProfileImages((prev) => {
+        const next = [...prev];
+        next[idx] = uri;
+        return next;
+      });
+    }
+  };
+
+  const handleSave = () => {
+    onBack();
+  };
+
+  const conversationList = useMemo(() => {
+    const meId = CURRENT_USER_ID ?? '';
+    return SEED_CONVERSATIONS.filter((c) => c.participants.includes(meId))
+      .slice()
+      .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
+      .map((c) => {
+        const otherId = c.participants.find((p) => p !== meId);
+        const user = otherId ? USER_MAP[otherId] : undefined;
+        return user ? { conv: c, user } : null;
+      })
+      .filter(
+        (x): x is { conv: SeedConversation; user: SeedUser } => x !== null,
+      );
+  }, []);
+
+  const visibleConvList = useMemo(
+    () =>
+      conversationList.filter(
+        ({ conv }) => !removedConvIds.has(conv.conversationId),
+      ),
+    [conversationList, removedConvIds],
+  );
+
+  const handleRemoveConv = (convId: string) => {
+    setRemovedConvIds((prev) => {
+      const next = new Set(prev);
+      next.add(convId);
+      return next;
+    });
+  };
+
+  const formatShortDate = (iso: string) => {
+    const d = new Date(iso);
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${m}.${day}`;
+  };
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <BrandHeader />
+
+      <KeyboardAvoidingView
+        style={styles.kav}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.content}>
+          <View
+            style={[
+              styles.row50,
+              openDropdown === 'language' && styles.row50Raised,
+            ]}
+          >
+            <View style={styles.half}>
+              <Text style={styles.label}>이름(닉네임)</Text>
+              <TextInput
+                value={nickname}
+                onChangeText={setNickname}
+                placeholder="탭해서 입력"
+                placeholderTextColor={PALETTE.textMuted}
+                style={styles.input}
+                maxLength={20}
+              />
+            </View>
+            <View style={styles.half}>
+              <Text style={styles.label}>언어</Text>
+              <View
+                style={[
+                  styles.dropdownAnchor,
+                  openDropdown === 'language' && styles.dropdownAnchorOpen,
+                ]}
+              >
+                <Pressable
+                  onPress={() => toggleDropdown('language')}
+                  style={({ pressed }) => [
+                    styles.selectInput,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.selectText,
+                      !language && styles.selectPlaceholder,
+                    ]}
+                  >
+                    {PROFILE_LANGUAGE_OPTIONS.find((o) => o.code === language)
+                      ?.label ?? '선택'}
+                  </Text>
+                  <Text style={styles.selectChevron}>
+                    {openDropdown === 'language' ? '⌃' : '›'}
+                  </Text>
+                </Pressable>
+                {openDropdown === 'language' ? (
+                  <View style={styles.dropdownOverlay}>
+                    {PROFILE_LANGUAGE_OPTIONS.map((o) => (
+                      <Pressable
+                        key={o.code}
+                        onPress={() => {
+                          setLanguage(o.code);
+                          setOpenDropdown(null);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownRow,
+                          pressed && styles.dropdownRowPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownText,
+                            language === o.code && styles.dropdownTextSel,
+                          ]}
+                        >
+                          {o.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.section,
+              openDropdown === 'country' && styles.sectionRaised,
+            ]}
+          >
+            <Text style={styles.label}>휴대폰 번호</Text>
+            <View style={styles.row}>
+              <View
+                style={[
+                  styles.dropdownAnchor,
+                  styles.countryAnchor,
+                  openDropdown === 'country' && styles.dropdownAnchorOpen,
+                ]}
+              >
+                <Pressable
+                  onPress={() => toggleDropdown('country')}
+                  disabled={isVerified}
+                  style={({ pressed }) => [
+                    styles.countrySelect,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.selectText} numberOfLines={1}>
+                    {countryCode === 'custom'
+                      ? customCountryCode || '그 외'
+                      : countryCode}
+                  </Text>
+                  <Text style={styles.selectChevron}>
+                    {openDropdown === 'country' ? '⌃' : '›'}
+                  </Text>
+                </Pressable>
+                {openDropdown === 'country' ? (
+                  <View style={styles.dropdownOverlay}>
+                    {PROFILE_COUNTRY_OPTIONS.map((o) => (
+                      <Pressable
+                        key={o.code}
+                        onPress={() => {
+                          setCountryCode(o.code);
+                          if (o.code === 'custom') {
+                            setCustomCountryCode('');
+                            setCustomCountryEditing(true);
+                          } else {
+                            setCustomCountryEditing(false);
+                          }
+                          setOpenDropdown(null);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownRow,
+                          pressed && styles.dropdownRowPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownText,
+                            countryCode === o.code && styles.dropdownTextSel,
+                          ]}
+                        >
+                          {o.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+              <TextInput
+                value={phoneNumber}
+                onChangeText={setPhoneNumber}
+                placeholder="번호 입력"
+                placeholderTextColor={PALETTE.textMuted}
+                style={styles.flexInput}
+                keyboardType="phone-pad"
+                editable={!isVerified}
+                maxLength={15}
+              />
+              {!isVerified ? (
+                <Pressable
+                  onPress={handleSendCode}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.smallBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.smallBtnText}>
+                    {codeSent ? '재전송' : '인증요청'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {countryCode === 'custom' && customCountryEditing ? (
+              <TextInput
+                value={customCountryCode}
+                onChangeText={handleCustomCountryChange}
+                onBlur={() => setCustomCountryEditing(false)}
+                onSubmitEditing={() => setCustomCountryEditing(false)}
+                placeholder="직접 입력"
+                placeholderTextColor={PALETTE.textMuted}
+                style={styles.customCountryInput}
+                keyboardType="phone-pad"
+                editable={!isVerified}
+                maxLength={6}
+                autoFocus
+              />
+            ) : null}
+          </View>
+
+          {codeSent ? (
+            <View style={styles.section}>
+              <Text style={styles.label}>인증번호</Text>
+              <View style={styles.row}>
+                <TextInput
+                  value={code}
+                  onChangeText={setCode}
+                  placeholder="6자리 숫자"
+                  placeholderTextColor={PALETTE.textMuted}
+                  style={styles.flexInput}
+                  keyboardType="number-pad"
+                  editable={!isVerified}
+                  maxLength={6}
+                />
+                {!isVerified ? (
+                  <Pressable
+                    onPress={handleVerifyCode}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.smallBtn,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.smallBtnText}>확인</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.verifiedBadge}>✓ 완료</Text>
+                )}
+              </View>
+            </View>
+          ) : null}
+
+          <View
+            style={[
+              styles.row50,
+              (openDropdown === 'region' || openDropdown === 'gender') &&
+                styles.row50Raised,
+            ]}
+          >
+            <View style={styles.half}>
+              <Text style={styles.label}>성별</Text>
+              <View
+                style={[
+                  styles.dropdownAnchor,
+                  openDropdown === 'gender' && styles.dropdownAnchorOpen,
+                ]}
+              >
+                <Pressable
+                  onPress={() => toggleDropdown('gender')}
+                  style={({ pressed }) => [
+                    styles.selectInput,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.selectText,
+                      !gender && styles.selectPlaceholder,
+                    ]}
+                  >
+                    {gender === 'male'
+                      ? '남성'
+                      : gender === 'female'
+                      ? '여성'
+                      : '선택'}
+                  </Text>
+                  <Text style={styles.selectChevron}>
+                    {openDropdown === 'gender' ? '⌃' : '›'}
+                  </Text>
+                </Pressable>
+                {openDropdown === 'gender' ? (
+                  <View style={styles.dropdownOverlay}>
+                    {[
+                      { code: 'male' as const, label: '남성' },
+                      { code: 'female' as const, label: '여성' },
+                    ].map((o) => (
+                      <Pressable
+                        key={o.code}
+                        onPress={() => {
+                          setGender(o.code);
+                          setOpenDropdown(null);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownRow,
+                          pressed && styles.dropdownRowPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownText,
+                            gender === o.code && styles.dropdownTextSel,
+                          ]}
+                        >
+                          {o.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+            <View style={styles.half}>
+              <Text style={styles.label}>지역</Text>
+              <View
+                style={[
+                  styles.dropdownAnchor,
+                  openDropdown === 'region' && styles.dropdownAnchorOpen,
+                ]}
+              >
+                <Pressable
+                  onPress={() => toggleDropdown('region')}
+                  style={({ pressed }) => [
+                    styles.selectInput,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.selectText,
+                      !region && styles.selectPlaceholder,
+                    ]}
+                  >
+                    {region ?? '선택'}
+                  </Text>
+                  <Text style={styles.selectChevron}>
+                    {openDropdown === 'region' ? '⌃' : '›'}
+                  </Text>
+                </Pressable>
+                {openDropdown === 'region' ? (
+                  <View style={styles.dropdownOverlay}>
+                    {PROFILE_REGION_OPTIONS.map((r) => (
+                      <Pressable
+                        key={r}
+                        onPress={() => {
+                          setRegion(r);
+                          setOpenDropdown(null);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownRow,
+                          pressed && styles.dropdownRowPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownText,
+                            region === r && styles.dropdownTextSel,
+                          ]}
+                        >
+                          {r}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.hint}>· 허락 이후 공개됩니다</Text>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.row50,
+              openDropdown === 'occupation' && styles.row50Raised,
+            ]}
+          >
+            <View style={styles.half}>
+              <Text style={styles.label}>생년월일</Text>
+              <TextInput
+                value={birthdate}
+                onChangeText={setBirthdate}
+                placeholder="YYYYMMDD"
+                placeholderTextColor={PALETTE.textMuted}
+                style={styles.input}
+                keyboardType="number-pad"
+                maxLength={8}
+              />
+              <Text style={styles.hint}>· 허락 이후 공개됩니다</Text>
+            </View>
+            <View style={styles.half}>
+              <Text style={styles.label}>직업</Text>
+              <View
+                style={[
+                  styles.dropdownAnchor,
+                  openDropdown === 'occupation' && styles.dropdownAnchorOpen,
+                ]}
+              >
+                <Pressable
+                  onPress={() => toggleDropdown('occupation')}
+                  style={({ pressed }) => [
+                    styles.selectInput,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.selectText,
+                      !occupation && styles.selectPlaceholder,
+                    ]}
+                  >
+                    {occupation ?? '선택'}
+                  </Text>
+                  <Text style={styles.selectChevron}>
+                    {openDropdown === 'occupation' ? '⌃' : '›'}
+                  </Text>
+                </Pressable>
+                {openDropdown === 'occupation' ? (
+                  <View style={styles.dropdownOverlay}>
+                    {PROFILE_OCCUPATION_OPTIONS.map((o) => (
+                      <Pressable
+                        key={o}
+                        onPress={() => {
+                          setOccupation(o);
+                          setOpenDropdown(null);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownRow,
+                          pressed && styles.dropdownRowPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownText,
+                            occupation === o && styles.dropdownTextSel,
+                          ]}
+                        >
+                          {o}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.hint}>· 허락 이후 공개됩니다</Text>
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>프로필 사진</Text>
+            <View style={styles.photoRow}>
+              {[0, 1, 2, 3, 4, 5].map((i) => {
+                const img = profileImages[i];
+                return (
+                  <Pressable
+                    key={i}
+                    onPress={() => handlePhotoSlot(i)}
+                    style={({ pressed }) => [
+                      styles.photoSlot,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    {img ? (
+                      <Image
+                        source={{ uri: img }}
+                        style={styles.photoSlotImg}
+                      />
+                    ) : (
+                      <Text style={styles.photoSlotPlus}>+</Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.hint}>· 허락 이후 공개됩니다</Text>
+          </View>
+
+          <View
+            style={[
+              styles.section,
+              openDropdown === 'convList' && styles.sectionRaised,
+            ]}
+          >
+            <Text style={styles.label}>대화 리스트</Text>
+            <View
+              style={[
+                styles.dropdownAnchor,
+                openDropdown === 'convList' && styles.dropdownAnchorOpen,
+              ]}
+            >
+              <Pressable
+                onPress={() => toggleDropdown('convList')}
+                style={({ pressed }) => [
+                  styles.selectInput,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.selectText,
+                    visibleConvList.length === 0 && styles.selectPlaceholder,
+                  ]}
+                >
+                  {visibleConvList.length === 0
+                    ? '없음'
+                    : `${visibleConvList.length}명`}
+                </Text>
+                <Text style={styles.selectChevron}>
+                  {openDropdown === 'convList' ? '⌃' : '›'}
+                </Text>
+              </Pressable>
+              {openDropdown === 'convList' ? (
+                <View style={[styles.dropdownOverlay, styles.convListOverlay]}>
+                  {visibleConvList.length === 0 ? (
+                    <Text style={styles.convEmpty}>없음</Text>
+                  ) : (
+                    <ScrollView
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {visibleConvList.map(({ conv, user }, idx) => (
+                        <View
+                          key={conv.conversationId}
+                          style={[
+                            styles.convListRow,
+                            idx === visibleConvList.length - 1 &&
+                              styles.convListRowLast,
+                          ]}
+                        >
+                          <Text style={styles.convListName} numberOfLines={1}>
+                            {user.nickname}
+                          </Text>
+                          <Text style={styles.convListTime}>
+                            {formatShortDate(conv.lastMessageAt)}
+                          </Text>
+                          <Pressable
+                            onPress={() =>
+                              handleRemoveConv(conv.conversationId)
+                            }
+                            hitSlop={8}
+                            style={({ pressed }) => [
+                              styles.convRemoveBtn,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            <Text style={styles.convRemoveIcon}>×</Text>
+                          </Pressable>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+              ) : null}
+            </View>
+          </View>
+
+          <Pressable
+            onPress={handleSave}
+            style={({ pressed }) => [
+              styles.saveBtn,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.saveBtnText}>저장</Text>
+          </Pressable>
+        </View>
+
+        {keyboardVisible ? (
+          <View style={styles.kbToolbar}>
+            <Pressable
+              onPress={Keyboard.dismiss}
+              style={({ pressed }) => [
+                styles.kbCloseBtn,
+                pressed && styles.pressed,
+              ]}
+            >
+              <View style={styles.kbCloseCircle}>
+                <Text style={styles.kbCloseIcon}>×</Text>
+              </View>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={bottomBarStyles.bar}>
+            <SizeButtons
+              textSizeStep={textSizeStep}
+              onChangeTextSize={onChangeTextSize}
+            />
+            <NavButton position="right" onPress={onBack} icon="←" />
+          </View>
+        )}
+      </KeyboardAvoidingView>
+
+      <Modal
+        visible={previewImage !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewImage(null)}
+      >
+        <Pressable
+          style={styles.previewBackdrop}
+          onPress={() => setPreviewImage(null)}
+        >
+          {previewImage ? (
+            <Image
+              source={{ uri: previewImage }}
+              style={styles.previewImage}
+              resizeMode="contain"
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+function createProfileSetupStyles(scale: number) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: PALETTE.bg },
+    kav: { flex: 1 },
+    content: {
+      flex: 1,
+      paddingHorizontal: 20,
+      paddingTop: 8,
+      paddingBottom: 8,
+    },
+    section: {
+      marginBottom: 10,
+    },
+    label: {
+      color: '#8fd9b6',
+      fontSize: 10 * scale,
+      fontWeight: '500',
+      letterSpacing: 0.5,
+      marginBottom: 4,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    input: {
+      color: '#FFFFFF',
+      fontSize: 13 * scale,
+      fontWeight: '300',
+      backgroundColor: PALETTE.card,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    flexInput: {
+      flex: 1,
+      color: '#FFFFFF',
+      fontSize: 13 * scale,
+      fontWeight: '300',
+      backgroundColor: PALETTE.card,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    smallBtn: {
+      paddingVertical: 7,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      backgroundColor: PALETTE.cardPressed,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.border,
+    },
+    smallBtnText: {
+      color: '#FFFFFF',
+      fontSize: 11 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    pressed: {
+      opacity: 0.6,
+    },
+    verifiedBadge: {
+      color: PALETTE.inviteAccent,
+      fontSize: 11 * scale,
+      fontWeight: '500',
+      paddingHorizontal: 8,
+      letterSpacing: 0.3,
+    },
+    selectInput: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: PALETTE.card,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    selectText: {
+      color: '#FFFFFF',
+      fontSize: 13 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+    },
+    selectPlaceholder: {
+      color: PALETTE.textMuted,
+    },
+    selectChevron: {
+      color: PALETTE.chevron,
+      fontSize: 16,
+      fontWeight: '300',
+    },
+    dropdownAnchor: {
+      position: 'relative',
+    },
+    countryAnchor: {
+      width: 92,
+    },
+    countrySelect: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: PALETTE.card,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    customCountryInput: {
+      color: '#FFFFFF',
+      fontSize: 13 * scale,
+      fontWeight: '300',
+      backgroundColor: PALETTE.card,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(255, 255, 255, 0.06)',
+      marginTop: 4,
+      alignSelf: 'flex-start',
+      width: 110,
+    },
+    dropdownAnchorOpen: {
+      zIndex: 100,
+      elevation: 12,
+    },
+    dropdownOverlay: {
+      position: 'absolute',
+      top: '100%',
+      left: 0,
+      right: 0,
+      marginTop: 4,
+      backgroundColor: PALETTE.card,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(255, 255, 255, 0.06)',
+      overflow: 'hidden',
+      zIndex: 200,
+      elevation: 14,
+    },
+    dropdownRow: {
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    dropdownRowPressed: {
+      backgroundColor: PALETTE.cardPressed,
+    },
+    dropdownText: {
+      color: '#FFFFFF',
+      fontSize: 12 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+    },
+    dropdownTextSel: {
+      color: '#8fd9b6',
+      fontWeight: '500',
+    },
+    photoRow: {
+      flexDirection: 'row',
+      gap: 4,
+    },
+    photoSlot: {
+      flex: 1,
+      aspectRatio: 1,
+      backgroundColor: PALETTE.card,
+      borderRadius: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(255, 255, 255, 0.06)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    photoSlotImg: {
+      width: '100%',
+      height: '100%',
+    },
+    photoSlotPlus: {
+      color: PALETTE.textMuted,
+      fontSize: 18,
+      fontWeight: '300',
+      lineHeight: 20,
+    },
+    previewBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.95)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    previewImage: {
+      width: '92%',
+      height: '80%',
+    },
+    hint: {
+      color: PALETTE.textMuted,
+      fontSize: 10 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.3,
+      marginTop: 4,
+      opacity: 0.8,
+    },
+    saveBtn: {
+      alignSelf: 'flex-end',
+      paddingVertical: 6,
+      paddingHorizontal: 16,
+      borderRadius: 6,
+      backgroundColor: PALETTE.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.border,
+      marginTop: 10,
+    },
+    saveBtnText: {
+      color: '#FFFFFF',
+      fontSize: 12 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    row50: {
+      flexDirection: 'row',
+      gap: 10,
+      marginBottom: 10,
+    },
+    row50Raised: {
+      zIndex: 100,
+      elevation: 12,
+    },
+    half: {
+      flex: 1,
+    },
+    sectionRaised: {
+      zIndex: 100,
+      elevation: 12,
+    },
+    convListOverlay: {
+      maxHeight: 200,
+    },
+    convListRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    convListRowLast: {
+      borderBottomWidth: 0,
+    },
+    convListName: {
+      color: '#FFFFFF',
+      fontSize: 13 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.2,
+      flex: 1,
+    },
+    convListTime: {
+      color: PALETTE.textMuted,
+      fontSize: 11 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+      marginRight: 10,
+    },
+    convRemoveBtn: {
+      width: 26,
+      height: 26,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    convRemoveIcon: {
+      color: PALETTE.textMuted,
+      fontSize: 18,
+      lineHeight: 20,
+      fontWeight: '300',
+    },
+    convEmpty: {
+      color: PALETTE.textMuted,
+      fontSize: 11 * scale,
+      fontWeight: '300',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      letterSpacing: 0.2,
+    },
+    kbToolbar: {
+      height: 60,
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'flex-end',
+      paddingHorizontal: 0,
+      backgroundColor: PALETTE.bg,
+    },
+    kbCloseBtn: {
+      paddingHorizontal: 16,
+      paddingBottom: 6,
+      height: 54,
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+    },
+    kbCloseCircle: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: PALETTE.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    kbCloseIcon: {
+      color: '#FFFFFF',
+      fontSize: 22,
+      lineHeight: 24,
+      fontWeight: '400',
+    },
+  });
 }
 
 function MessageBubble({
@@ -2117,43 +3225,6 @@ function createPostDetailStyles(scale: number) {
   });
 }
 
-function createProfileStyles(scale: number) {
-  return StyleSheet.create({
-    safe: {
-      flex: 1,
-      backgroundColor: PALETTE.bg,
-    },
-    scrollFlex: {
-      flex: 1,
-    },
-    content: {
-      paddingHorizontal: 26,
-      paddingTop: 32,
-      paddingBottom: SCROLL_BOTTOM_PADDING,
-    },
-    sectionLabel: {
-      color: PALETTE.textMuted,
-      fontSize: 12 * scale,
-      letterSpacing: 1.5,
-      marginBottom: 14,
-      fontWeight: '300',
-      textTransform: 'uppercase',
-    },
-    sectionDivider: {
-      height: 1,
-      backgroundColor: PALETTE.border,
-      opacity: 0.4,
-      marginVertical: 30,
-    },
-    sectionPlaceholder: {
-      color: PALETTE.textMuted,
-      fontSize: 14 * scale,
-      lineHeight: 24 * scale,
-      fontWeight: '300',
-      letterSpacing: 0.3,
-    },
-  });
-}
 
 function createConversationStyles(scale: number) {
   return StyleSheet.create({
