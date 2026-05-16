@@ -6,7 +6,9 @@
       "PowerShell(Get-ChildItem -Path 'C:\\\\Projects\\\\dulsai\\\\assets' -Force | Sort-Object LastWriteTime -Descending | ForEach-Object { \"$\\($_.LastWriteTime.ToString\\('yyyy-MM-dd HH:mm:ss'\\)\\)  $\\($_.Length.ToString\\(\\).PadLeft\\(8\\)\\)  $\\($_.Name\\)\" })",
       "PowerShell(py *)",
       "PowerShell(npx expo install expo-image-picker 2>&1 | Select-Object -Last 15)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(npx expo *)",
+      "Bash(node *)"
     ]
   }
 }

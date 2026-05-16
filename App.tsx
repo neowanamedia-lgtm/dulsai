@@ -21,6 +21,9 @@ import {
 
 import * as ImagePicker from 'expo-image-picker';
 
+import { checkSupabaseHealth } from './src/api/health';
+import { runSupabaseSmokeTests } from './src/api/smoke-test';
+
 import {
   SEED_CONVERSATIONS,
   SEED_MESSAGES,
@@ -431,6 +434,15 @@ export default function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [deletedConversationIds, setDeletedConversationIds] = useState<string[]>([]);
   const [viewerLanguage, setViewerLanguage] = useState<Language>('ko');
+
+  useEffect(() => {
+    (async () => {
+      await checkSupabaseHealth();
+      if (__DEV__) {
+        await runSupabaseSmokeTests();
+      }
+    })();
+  }, []);
 
   const scale = SCALES[textSizeStep];
 
