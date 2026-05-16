@@ -1,10 +1,19 @@
 export const POST_LENGTH_RULES = {
-  minChars: 50,
-  recommendedMin: 80,
-  recommendedMax: 200,
-  maxChars: 320,
+  minChars: 20,
+  recommendedMin: 150,
+  recommendedMax: 500,
+  maxChars: 800,
   minLines: 2,
-  maxLines: 8,
+  maxLines: 20,
+} as const;
+
+export const REPLY_LENGTH_RULES = {
+  minChars: 20,
+  recommendedMin: 50,
+  recommendedMax: 300,
+  maxChars: 500,
+  minLines: 1,
+  maxLines: 12,
 } as const;
 
 export const POST_INPUT_UI = {

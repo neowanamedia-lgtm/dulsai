@@ -1,52 +1,103 @@
-// 주의: conversations / conversation_messages 테이블은 아직 실제 Supabase 마이그레이션이 적용되지 않았다.
-// 이 모듈은 추후 SQL 확정 시 활성화하기 위한 인터페이스 placeholder 이며,
-// 지금은 graceful no-op 으로 동작한다 (logger.warn 후 빈 결과 반환).
-// 실제 호출 시점에 컬럼명(특히 PK = 'id') 과 Database 스키마 등록을 함께 갱신한다.
-
+import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import type {
   DbConversation,
   DbConversationInsert,
-  DbConversationMessage,
-  DbConversationMessageInsert,
 } from '../types/db';
 
-function warnPending(fn: string) {
-  logger.warn('conversations table not provisioned yet', { fn });
+// (user_a_id, user_b_id) 가 항상 작은 UUID 먼저 오도록 정렬.
+// CHECK / UNIQUE 제약을 만족시키기 위한 보조.
+export function orderUserPair(a: string, b: string): {
+  user_a_id: string;
+  user_b_id: string;
+} {
+  return a < b
+    ? { user_a_id: a, user_b_id: b }
+    : { user_a_id: b, user_b_id: a };
 }
 
 export async function listMyConversations(
-  _userId: string,
+  userId: string,
 ): Promise<DbConversation[]> {
-  warnPending('listMyConversations');
-  return [];
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('*')
+    .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`)
+    .order('last_message_at', { ascending: false, nullsFirst: false });
+  if (error) {
+    logger.warn('listMyConversations failed', {
+      userId,
+      message: error.message,
+    });
+    return [];
+  }
+  return data ?? [];
 }
 
 export async function getConversationById(
-  _conversationId: string,
+  conversationId: string,
 ): Promise<DbConversation | null> {
-  warnPending('getConversationById');
-  return null;
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('id', conversationId)
+    .maybeSingle();
+  if (error) {
+    logger.warn('getConversationById failed', {
+      conversationId,
+      message: error.message,
+    });
+    return null;
+  }
+  return data;
 }
 
-export async function createConversation(
-  _input: DbConversationInsert,
-): Promise<DbConversation | null> {
-  warnPending('createConversation');
-  return null;
+// 초대 accept 시점에 호출. 같은 페어가 이미 있으면 unique 제약으로 차단됨.
+export async function createConversation(args: {
+  postId: string;
+  inviteId: string;
+  userIdA: string;
+  userIdB: string;
+}): Promise<DbConversation | null> {
+  const pair = orderUserPair(args.userIdA, args.userIdB);
+  const payload: DbConversationInsert = {
+    post_id: args.postId,
+    invite_id: args.inviteId,
+    ...pair,
+  };
+  const { data, error } = await supabase
+    .from('conversations')
+    .insert(payload)
+    .select('*')
+    .maybeSingle();
+  if (error) {
+    if (error.code === '23505') {
+      // 이미 같은 페어 대화방이 있다 — 기존 row 조회로 폴백.
+      const existing = await findExistingConversation(pair);
+      if (existing) return existing;
+    }
+    logger.error('createConversation failed', {
+      code: error.code,
+      message: error.message,
+    });
+    return null;
+  }
+  return data;
 }
 
-export async function listMessages(
-  _conversationId: string,
-  _opts: { limit?: number; beforeIso?: string } = {},
-): Promise<DbConversationMessage[]> {
-  warnPending('listMessages');
-  return [];
-}
-
-export async function sendMessage(
-  _input: DbConversationMessageInsert,
-): Promise<DbConversationMessage | null> {
-  warnPending('sendMessage');
-  return null;
+async function findExistingConversation(pair: {
+  user_a_id: string;
+  user_b_id: string;
+}): Promise<DbConversation | null> {
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('user_a_id', pair.user_a_id)
+    .eq('user_b_id', pair.user_b_id)
+    .maybeSingle();
+  if (error) {
+    logger.warn('findExistingConversation failed', { message: error.message });
+    return null;
+  }
+  return data;
 }

@@ -24,7 +24,17 @@ export async function listCommentsByPost(
   return data ?? [];
 }
 
+// DulSai 에서 reply 는 post_comments 테이블 위에 얹힌 동일 개념.
+// 호출부 가독성을 위해 createReply alias 를 함께 export 한다.
+export const createReply = createCommentImpl;
+
 export async function createComment(
+  input: DbPostCommentInsert,
+): Promise<DbPostComment | null> {
+  return createCommentImpl(input);
+}
+
+async function createCommentImpl(
   input: DbPostCommentInsert,
 ): Promise<DbPostComment | null> {
   const { data, error } = await supabase
@@ -38,6 +48,8 @@ export async function createComment(
   }
   return data;
 }
+
+// ↑ createCommentImpl 종료
 
 export async function updateComment(
   commentId: string,

@@ -23,6 +23,25 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { checkSupabaseHealth } from './src/api/health';
 import { runSupabaseSmokeTests } from './src/api/smoke-test';
+import { POST_LENGTH_RULES, REPLY_LENGTH_RULES } from './lib/post-policy';
+import { checkSafety, isWriteBlocked, reportViolation } from './src/safety';
+import { createPost as createPostRemote } from './src/api/posts';
+import { createReply as createReplyRemote } from './src/api/comments';
+import {
+  createInvite as createInviteRemote,
+  acceptInvite as acceptInviteRemote,
+  declineInvite as declineInviteRemote,
+  withdrawInvite as withdrawInviteRemote,
+} from './src/api/invites';
+import {
+  createConversation as createConversationRemote,
+  listMyConversations as listMyConversationsRemote,
+} from './src/api/conversations';
+import type {
+  ConversationInviteStatus,
+  DbConversation,
+} from './src/types/db';
+import { AuthProvider, useCurrentUserId } from './src/auth/AuthContext';
 
 import {
   SEED_CONVERSATIONS,
@@ -177,7 +196,9 @@ type Route =
   | 'category'
   | 'post'
   | 'profile'
-  | 'conversation';
+  | 'conversation'
+  | 'conversations'
+  | 'compose';
 
 const PALETTE = {
   bg: '#141210',
@@ -197,6 +218,8 @@ const PALETTE = {
   profileFemaleBg: '#a85f72',
   inviteAccent: '#7daa97',
   invitePanel: '#23211d',
+  // 프로필 섹션 라벨 / 메인 상단 prompt 공통 색상.
+  labelAccent: '#8fd9b6',
   bubbleMale: '#6f8298',
   bubbleFemale: '#a88990',
 };
@@ -213,7 +236,9 @@ const BOTTOM_BUTTON_OFFSET = 14;
 const BOTTOM_BAR_HEIGHT = BOTTOM_BUTTON_HEIGHT + BOTTOM_BUTTON_OFFSET + 14;
 const SCROLL_BOTTOM_PADDING = 10;
 
-const CURRENT_USER_ID: string | null = 'm_01';
+// CURRENT_USER_ID 상수는 제거됨.
+// 실제 작성/초대/전송 권한 판단은 useCurrentUserId() (Supabase auth session 기반) 으로 수행.
+// 시드 사용자 m_01 등은 시드 표시용으로만 남아있다.
 
 const DISCLOSURE_LABEL: Record<DisclosureKind, string> = {
   region: '지역',
@@ -425,7 +450,26 @@ function relTime(iso: string): string {
   return `${Math.floor(diffSec / 86400)}일 전`;
 }
 
+type InviteUIState = {
+  inviteId: string;
+  status: ConversationInviteStatus;
+  postId: string;
+  replyId: string;
+  senderId: string;
+  receiverId: string;
+  conversationId: string | null;
+};
+
 export default function App() {
+  return (
+    <AuthProvider>
+      <AppShell />
+    </AuthProvider>
+  );
+}
+
+function AppShell() {
+  const currentUserId = useCurrentUserId();
   const [textSizeStep, setTextSizeStep] = useState<TextSizeStep>(0);
   const [route, setRoute] = useState<Route>('main');
   const [previousRoute, setPreviousRoute] = useState<Route>('main');
@@ -433,6 +477,21 @@ export default function App() {
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [deletedConversationIds, setDeletedConversationIds] = useState<string[]>([]);
+  const [localPosts, setLocalPosts] = useState<SeedPost[]>([]);
+  const [localReplies, setLocalReplies] = useState<Record<string, SeedReply[]>>(
+    {},
+  );
+  const [localInvites, setLocalInvites] = useState<
+    Record<string, ConversationInvite>
+  >({});
+  // replyId 단위로 invite 의 상태/conversation 연결을 관리.
+  // realtime 구독을 추후 붙일 때도 id 기반이라 reducer 식 갱신이 가능.
+  const [inviteStateByReply, setInviteStateByReply] = useState<
+    Record<string, InviteUIState>
+  >({});
+  // 내가 참여 중인 대화방 목록 (서버 fetch 결과 + 로컬 갱신).
+  const [myConversations, setMyConversations] = useState<DbConversation[]>([]);
+  const [composeMode, setComposeMode] = useState<'post' | 'reply'>('post');
   const [viewerLanguage, setViewerLanguage] = useState<Language>('ko');
 
   useEffect(() => {
@@ -460,6 +519,210 @@ export default function App() {
     setSelectedPostId(postId);
     setRoute('post');
   };
+
+  const openCompose = (categoryId: string) => {
+    setSelectedCategoryId(categoryId);
+    setComposeMode('post');
+    setRoute('compose');
+  };
+
+  const openComposeReply = (postId: string) => {
+    const seed = SEED_POSTS.find((p) => p.postId === postId);
+    const local = localPosts.find((p) => p.postId === postId);
+    const target = seed ?? local;
+    if (!target) return;
+    setSelectedCategoryId(target.categoryId);
+    setSelectedPostId(postId);
+    setComposeMode('reply');
+    setRoute('compose');
+  };
+
+  // Supabase 저장 성공이 확인된 뒤에만 로컬 미러에 반영.
+  // 실패 시 로컬 추가 없이 false 반환 → ComposeScreen 에서 부드러운 안내 표시.
+  const handleSubmitCompose = async (content: string): Promise<boolean> => {
+    if (!currentUserId) return false;
+    const me = currentUserId;
+    if (composeMode === 'post' && selectedCategoryId) {
+      const saved = await createPostRemote({
+        user_id: me,
+        category: selectedCategoryId,
+        body: content,
+      });
+      if (!saved) return false;
+      const newPost: SeedPost = {
+        postId: saved.id,
+        userId: saved.user_id,
+        categoryId: saved.category,
+        originalLanguage: viewerLanguage,
+        originalContent: saved.body,
+        createdAt: saved.created_at,
+        replies: [],
+        isSample: true,
+      };
+      setLocalPosts((prev) => [newPost, ...prev]);
+      setRoute('category');
+      return true;
+    }
+    if (composeMode === 'reply' && selectedPostId) {
+      const pid = selectedPostId;
+      const saved = await createReplyRemote({
+        post_id: pid,
+        user_id: me,
+        body: content,
+      });
+      if (!saved) return false;
+      const newReply: SeedReply = {
+        replyId: saved.id,
+        userId: saved.user_id,
+        originalLanguage: viewerLanguage,
+        originalContent: saved.body,
+        createdAt: saved.created_at,
+        isSample: true,
+      };
+      setLocalReplies((prev) => ({
+        ...prev,
+        [pid]: [...(prev[pid] ?? []), newReply],
+      }));
+      setRoute('post');
+      return true;
+    }
+    return false;
+  };
+
+  // 대화 초대 — Supabase 저장 성공 후에만 로컬 미러에 반영.
+  // 중복 초대(이미 invites 에 같은 replyId 존재) 는 차단.
+  const handleSendInvite = async (
+    replyId: string,
+    receiverId: string,
+    postId: string,
+  ): Promise<boolean> => {
+    if (!currentUserId) return false;
+    if (inviteStateByReply[replyId] || localInvites[replyId]) return false;
+    const me = currentUserId;
+    const content =
+      '괜찮다면 이 문장을 계기로 조금 더 천천히 이야기 나눠보고 싶어요.';
+    const saved = await createInviteRemote({
+      postId,
+      replyId,
+      senderId: me,
+      receiverId,
+      content,
+    });
+    if (!saved) return false;
+    const newInvite: ConversationInvite = {
+      inviteId: saved.inviteId,
+      userId: saved.senderId,
+      originalLanguage: 'ko',
+      originalContent: saved.content,
+      createdAt: saved.createdAt,
+      isSample: true,
+    };
+    setLocalInvites((prev) => ({ ...prev, [replyId]: newInvite }));
+    setInviteStateByReply((prev) => ({
+      ...prev,
+      [replyId]: {
+        inviteId: saved.inviteId,
+        status: 'pending',
+        postId: saved.postId,
+        replyId: saved.replyId,
+        senderId: saved.senderId,
+        receiverId: saved.receiverId,
+        conversationId: null,
+      },
+    }));
+    return true;
+  };
+
+  const handleAcceptInvite = async (replyId: string): Promise<boolean> => {
+    if (!currentUserId) return false;
+    const state = inviteStateByReply[replyId];
+    if (!state || state.status !== 'pending') return false;
+    if (state.receiverId !== currentUserId) return false;
+
+    const accepted = await acceptInviteRemote(state.inviteId);
+    if (!accepted) return false;
+
+    const conv = await createConversationRemote({
+      postId: state.postId,
+      inviteId: state.inviteId,
+      userIdA: state.senderId,
+      userIdB: state.receiverId,
+    });
+    if (!conv) {
+      // accept 자체는 됐지만 conversation 생성 실패 — 상태만 accepted 로 반영.
+      setInviteStateByReply((prev) => ({
+        ...prev,
+        [replyId]: { ...state, status: 'accepted' },
+      }));
+      return false;
+    }
+    setInviteStateByReply((prev) => ({
+      ...prev,
+      [replyId]: { ...state, status: 'accepted', conversationId: conv.id },
+    }));
+    setMyConversations((prev) =>
+      prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev],
+    );
+    return true;
+  };
+
+  const handleDeclineInvite = async (replyId: string): Promise<boolean> => {
+    if (!currentUserId) return false;
+    const state = inviteStateByReply[replyId];
+    if (!state || state.status !== 'pending') return false;
+    if (state.receiverId !== currentUserId) return false;
+    const declined = await declineInviteRemote(state.inviteId);
+    if (!declined) return false;
+    setInviteStateByReply((prev) => ({
+      ...prev,
+      [replyId]: { ...state, status: 'declined' },
+    }));
+    return true;
+  };
+
+  const handleWithdrawInvite = async (replyId: string): Promise<boolean> => {
+    if (!currentUserId) return false;
+    const state = inviteStateByReply[replyId];
+    if (!state || state.status !== 'pending') return false;
+    if (state.senderId !== currentUserId) return false;
+    const withdrawn = await withdrawInviteRemote(state.inviteId);
+    if (!withdrawn) return false;
+    setInviteStateByReply((prev) => ({
+      ...prev,
+      [replyId]: { ...state, status: 'withdrawn' },
+    }));
+    setLocalInvites((prev) => {
+      const next = { ...prev };
+      delete next[replyId];
+      return next;
+    });
+    return true;
+  };
+
+  const openConversationById = (conversationId: string) => {
+    setPreviousRoute(route);
+    setSelectedConversationId(conversationId);
+    setRoute('conversation');
+  };
+
+  const openConversationList = () => {
+    setRoute('conversations');
+  };
+
+  // 인증 상태 변동 시 내 대화방 목록을 fetch. 실패하면 빈 배열.
+  useEffect(() => {
+    if (!currentUserId) {
+      setMyConversations([]);
+      return;
+    }
+    let cancelled = false;
+    void listMyConversationsRemote(currentUserId).then((rows) => {
+      if (!cancelled) setMyConversations(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId]);
 
   const openProfile = () => {
     setPreviousRoute(route);
@@ -490,8 +753,11 @@ export default function App() {
 
   const goBack = () => {
     if (route === 'profile') setRoute(previousRoute);
-    else if (route === 'conversation') setRoute('post');
+    else if (route === 'conversation') setRoute(previousRoute);
+    else if (route === 'conversations') setRoute('main');
     else if (route === 'post') setRoute('category');
+    else if (route === 'compose')
+      setRoute(composeMode === 'reply' ? 'post' : 'category');
     else setRoute('main');
   };
 
@@ -516,9 +782,31 @@ export default function App() {
           onChangeTextSize={changeTextSize}
           categoryId={selectedCategoryId}
           viewerLanguage={viewerLanguage}
+          localPosts={localPosts}
+          localReplies={localReplies}
           onBack={goBack}
           onOpenPost={openPost}
           onOpenProfile={openProfile}
+          onOpenCompose={openCompose}
+        />
+      )}
+      {route === 'compose' && selectedCategoryId && (
+        <ComposeScreen
+          scale={scale}
+          textSizeStep={textSizeStep}
+          onChangeTextSize={changeTextSize}
+          categoryId={selectedCategoryId}
+          viewerLanguage={viewerLanguage}
+          mode={composeMode}
+          replyTargetPost={
+            composeMode === 'reply' && selectedPostId
+              ? SEED_POSTS.find((p) => p.postId === selectedPostId) ??
+                localPosts.find((p) => p.postId === selectedPostId) ??
+                null
+              : null
+          }
+          onBack={goBack}
+          onSubmit={handleSubmitCompose}
         />
       )}
       {route === 'post' && selectedPostId && (
@@ -528,9 +816,29 @@ export default function App() {
           onChangeTextSize={changeTextSize}
           postId={selectedPostId}
           viewerLanguage={viewerLanguage}
+          localPosts={localPosts}
+          localReplies={localReplies}
+          localInvites={localInvites}
+          inviteStateByReply={inviteStateByReply}
           onBack={goBack}
           onOpenProfile={openProfile}
           onOpenConversation={openConversation}
+          onOpenConversationById={openConversationById}
+          onOpenReplyCompose={openComposeReply}
+          onSendInvite={handleSendInvite}
+          onAcceptInvite={handleAcceptInvite}
+          onDeclineInvite={handleDeclineInvite}
+          onWithdrawInvite={handleWithdrawInvite}
+        />
+      )}
+      {route === 'conversations' && (
+        <ConversationListScreen
+          scale={scale}
+          textSizeStep={textSizeStep}
+          onChangeTextSize={changeTextSize}
+          conversations={myConversations}
+          onBack={goBack}
+          onOpenConversation={openConversationById}
         />
       )}
       {route === 'conversation' && selectedConversationId && (
@@ -550,6 +858,7 @@ export default function App() {
           textSizeStep={textSizeStep}
           onChangeTextSize={changeTextSize}
           onBack={goBack}
+          onOpenConversationList={openConversationList}
         />
       )}
     </View>
@@ -628,31 +937,37 @@ function CategoryScreen({
   onChangeTextSize,
   categoryId,
   viewerLanguage,
+  localPosts,
+  localReplies,
   onBack,
   onOpenPost,
   onOpenProfile,
+  onOpenCompose,
 }: {
   scale: number;
   textSizeStep: TextSizeStep;
   onChangeTextSize: (delta: number) => void;
   categoryId: string;
   viewerLanguage: Language;
+  localPosts: SeedPost[];
+  localReplies: Record<string, SeedReply[]>;
   onBack: () => void;
   onOpenPost: (postId: string) => void;
   onOpenProfile: () => void;
+  onOpenCompose: (categoryId: string) => void;
 }) {
   const styles = useMemo(() => createCategoryStyles(scale), [scale]);
   const category = CATEGORY_MAP[categoryId];
   const categoryLabel = category
     ? category.labels[viewerLanguage] ?? category.labels.ko
     : '';
-  const posts = useMemo(
-    () =>
-      (POSTS_BY_CATEGORY[categoryId] ?? []).filter((p) =>
-        isPostVisibleIn(p, viewerLanguage),
-      ),
-    [categoryId, viewerLanguage],
-  );
+  const posts = useMemo(() => {
+    const seed = POSTS_BY_CATEGORY[categoryId] ?? [];
+    const local = localPosts.filter((p) => p.categoryId === categoryId);
+    return [...local, ...seed]
+      .filter((p) => isPostVisibleIn(p, viewerLanguage))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [categoryId, viewerLanguage, localPosts]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -702,7 +1017,9 @@ function CategoryScreen({
                     <Text style={styles.authorTime}>{relTime(post.createdAt)}</Text>
                     <View style={styles.headerRight}>
                       <Text style={styles.replyCount}>
-                        답글 {post.replies.length}
+                        답글{' '}
+                        {post.replies.length +
+                          (localReplies[post.postId]?.length ?? 0)}
                       </Text>
                       <Text style={styles.chevron}>›</Text>
                     </View>
@@ -724,10 +1041,507 @@ function CategoryScreen({
 
       <View style={bottomBarStyles.bar}>
         <SizeButtons textSizeStep={textSizeStep} onChangeTextSize={onChangeTextSize} />
+        <Pressable
+          onPress={() => onOpenCompose(categoryId)}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.composeBtn,
+            pressed && styles.composeBtnPressed,
+          ]}
+        >
+          <Text style={styles.composeBtnText}>생각 남기기</Text>
+        </Pressable>
         <NavButton position="right" onPress={onBack} icon="←" />
       </View>
     </SafeAreaView>
   );
+}
+
+function ComposeScreen({
+  scale,
+  textSizeStep,
+  onChangeTextSize,
+  categoryId,
+  viewerLanguage,
+  mode,
+  replyTargetPost,
+  onBack,
+  onSubmit,
+}: {
+  scale: number;
+  textSizeStep: TextSizeStep;
+  onChangeTextSize: (delta: number) => void;
+  categoryId: string;
+  viewerLanguage: Language;
+  mode: 'post' | 'reply';
+  replyTargetPost?: SeedPost | null;
+  onBack: () => void;
+  onSubmit: (content: string) => Promise<boolean>;
+}) {
+  const currentUserId = useCurrentUserId();
+  const styles = useMemo(() => createComposeStyles(scale), [scale]);
+  const rules = mode === 'reply' ? REPLY_LENGTH_RULES : POST_LENGTH_RULES;
+  const placeholder =
+    mode === 'reply'
+      ? '이 글에 답글을 남겨보세요.'
+      : '지금 마음에 있는 생각을 남겨보세요.';
+  const [body, setBody] = useState('');
+  const [safetyHint, setSafetyHint] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const trimmed = body.trim();
+  const charCount = trimmed.length;
+  const canSubmit =
+    !submitting && charCount >= rules.minChars && charCount <= rules.maxChars;
+
+  const category = CATEGORY_MAP[categoryId];
+  const categoryLabel = category
+    ? category.labels[viewerLanguage] ?? category.labels.ko
+    : '';
+
+  const replyAuthor =
+    mode === 'reply' && replyTargetPost
+      ? USER_MAP[replyTargetPost.userId]
+      : undefined;
+  const replyResolved =
+    mode === 'reply' && replyTargetPost
+      ? resolveContent({
+          targetType: 'post',
+          targetId: replyTargetPost.postId,
+          originalContent: replyTargetPost.originalContent,
+          originalLanguage: replyTargetPost.originalLanguage,
+          viewerLanguage,
+          translations: SEED_TRANSLATIONS,
+        })
+      : null;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    if (!currentUserId) {
+      setSafetyHint('먼저 본인 확인을 완료해 주세요.');
+      return;
+    }
+    const userId = currentUserId;
+    if (isWriteBlocked(userId)) {
+      setSafetyHint('잠시 쉬었다가 다시 이어가 주세요.');
+      return;
+    }
+    const ctx = mode === 'reply' ? 'reply' : 'post';
+    const result = checkSafety(trimmed, ctx);
+    if (!result.ok) {
+      setSafetyHint(result.hint);
+      reportViolation({
+        userId,
+        context: ctx,
+        result,
+        rawText: trimmed,
+      });
+      return;
+    }
+    setSafetyHint(null);
+    setSubmitting(true);
+    try {
+      const ok = await onSubmit(trimmed);
+      if (!ok) {
+        setSafetyHint('지금은 저장되지 않아요. 잠시 후 다시 시도해 주세요.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleChangeBody = (v: string) => {
+    setBody(v);
+    if (safetyHint) setSafetyHint(null);
+  };
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <BrandHeader />
+
+      <View style={styles.headerArea}>
+        {mode === 'reply' && replyTargetPost && replyAuthor ? (
+          <View style={styles.replyTarget}>
+            <View style={styles.replyTargetHeader}>
+              <ProfileAvatar
+                user={replyAuthor}
+                size={26}
+                style={styles.replyTargetAvatar}
+              />
+              <Text style={styles.replyTargetName} numberOfLines={1}>
+                {replyAuthor.nickname}
+              </Text>
+              <Text style={styles.replyTargetTime}>
+                {relTime(replyTargetPost.createdAt)}
+              </Text>
+            </View>
+            <Text
+              style={styles.replyTargetBody}
+              numberOfLines={5}
+              ellipsizeMode="tail"
+            >
+              {replyResolved?.text ?? replyTargetPost.originalContent}
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.categoryTitle} numberOfLines={1}>
+            {categoryLabel}
+          </Text>
+        )}
+        <Pressable
+          onPress={onBack}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.closeBtn,
+            pressed && styles.closeBtnPressed,
+          ]}
+        >
+          <Text style={styles.closeIcon}>×</Text>
+        </Pressable>
+      </View>
+
+      <KeyboardAvoidingView
+        style={styles.kav}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.content}>
+          <TextInput
+            value={body}
+            onChangeText={handleChangeBody}
+            placeholder={placeholder}
+            placeholderTextColor={PALETTE.textMuted}
+            multiline
+            textAlignVertical="top"
+            style={styles.input}
+            maxLength={rules.maxChars}
+            autoFocus
+          />
+
+          {safetyHint ? (
+            <Text style={styles.safetyHint}>· {safetyHint}</Text>
+          ) : null}
+
+          <View style={styles.footer}>
+            <Text style={styles.counter}>
+              {charCount}자 · 최소 {rules.minChars} / 최대 {rules.maxChars}
+            </Text>
+            <Pressable
+              onPress={handleSubmit}
+              disabled={!canSubmit}
+              style={({ pressed }) => [
+                styles.submitBtn,
+                !canSubmit && styles.submitBtnDisabled,
+                pressed && canSubmit && styles.submitBtnPressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.submitBtnText,
+                  !canSubmit && styles.submitBtnTextDisabled,
+                ]}
+              >
+                남기기
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function createComposeStyles(scale: number) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: PALETTE.bg },
+    kav: { flex: 1 },
+    headerArea: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      paddingHorizontal: 24,
+      paddingTop: 4,
+      paddingBottom: 12,
+    },
+    categoryTitle: {
+      color: '#FFFFFF',
+      fontSize: 16 * scale,
+      lineHeight: 25 * scale,
+      fontWeight: '500',
+      letterSpacing: 0.3,
+      flex: 1,
+    },
+    replyTarget: {
+      flex: 1,
+      marginRight: 8,
+    },
+    replyTargetHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    replyTargetAvatar: {
+      marginRight: 10,
+    },
+    replyTargetName: {
+      color: '#FFFFFF',
+      fontSize: 13 * scale,
+      fontWeight: '500',
+      letterSpacing: 0.3,
+    },
+    replyTargetTime: {
+      color: PALETTE.textMuted,
+      fontSize: 11 * scale,
+      marginLeft: 8,
+    },
+    replyTargetBody: {
+      color: '#FFFFFF',
+      fontSize: 13 * scale,
+      lineHeight: 20 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+      opacity: 0.85,
+    },
+    closeBtn: {
+      width: 32,
+      height: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 8,
+    },
+    closeBtnPressed: {
+      opacity: 0.5,
+    },
+    closeIcon: {
+      color: PALETTE.textMuted,
+      fontSize: 24,
+      lineHeight: 26,
+      fontWeight: '300',
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: 24,
+      paddingTop: 4,
+      paddingBottom: 12,
+    },
+    input: {
+      flex: 1,
+      color: '#FFFFFF',
+      fontSize: 15 * scale,
+      lineHeight: 24 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.3,
+      paddingTop: 4,
+      paddingBottom: 4,
+    },
+    footer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: 12,
+      marginTop: 8,
+    },
+    counter: {
+      color: PALETTE.textMuted,
+      fontSize: 11 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+      flex: 1,
+    },
+    safetyHint: {
+      color: PALETTE.inviteAccent,
+      fontSize: 11 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.3,
+      paddingTop: 8,
+      opacity: 0.9,
+    },
+    submitBtn: {
+      paddingHorizontal: 18,
+      paddingVertical: 8,
+      borderRadius: 16,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.border,
+      backgroundColor: PALETTE.settingsBg,
+    },
+    submitBtnDisabled: {
+      opacity: 0.4,
+    },
+    submitBtnPressed: {
+      opacity: 0.7,
+    },
+    submitBtnText: {
+      color: '#FFFFFF',
+      fontSize: 12 * scale,
+      fontWeight: '500',
+      letterSpacing: 0.5,
+    },
+    submitBtnTextDisabled: {
+      color: PALETTE.textMuted,
+    },
+  });
+}
+
+function ConversationListScreen({
+  scale,
+  textSizeStep,
+  onChangeTextSize,
+  conversations,
+  onBack,
+  onOpenConversation,
+}: {
+  scale: number;
+  textSizeStep: TextSizeStep;
+  onChangeTextSize: (delta: number) => void;
+  conversations: DbConversation[];
+  onBack: () => void;
+  onOpenConversation: (conversationId: string) => void;
+}) {
+  const currentUserId = useCurrentUserId();
+  const styles = useMemo(() => createConversationListStyles(scale), [scale]);
+
+  // 마지막 활동 시간 내림차순 + 상대 닉네임 / 최근 메시지 일부 매핑.
+  // 닉네임은 우선 시드 USER_MAP, 추후 users 테이블 fetch 로 보강 예정.
+  const enriched = useMemo(() => {
+    return [...conversations]
+      .map((c) => {
+        const otherId =
+          c.user_a_id === currentUserId ? c.user_b_id : c.user_a_id;
+        const other = USER_MAP[otherId];
+        // 시드 메시지에 한해 lookup. 실제 새 conversation 은 마지막 메시지 없음.
+        const msgs = SEED_MESSAGES.filter((m) => m.conversationId === c.id);
+        const lastSeed =
+          msgs.length === 0
+            ? null
+            : msgs.reduce(
+                (acc, m) =>
+                  acc.createdAt.localeCompare(m.createdAt) >= 0 ? acc : m,
+                msgs[0],
+              );
+        const lastTime = c.last_message_at ?? lastSeed?.createdAt ?? c.created_at;
+        return {
+          conv: c,
+          otherId,
+          otherNickname: other?.nickname ?? '익명',
+          excerpt: lastSeed?.originalContent ?? null,
+          lastTime,
+        };
+      })
+      .sort((a, b) => b.lastTime.localeCompare(a.lastTime));
+  }, [conversations, currentUserId]);
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <BrandHeader />
+      <View style={styles.titleArea}>
+        <Text style={styles.title}>지금 이어지고 있는 대화</Text>
+      </View>
+      <ScrollView
+        style={styles.scrollFlex}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {enriched.length === 0 ? (
+          <Text style={styles.empty}>
+            아직 이어지고 있는 대화가 없어요.
+          </Text>
+        ) : (
+          enriched.map((item) => (
+            <Pressable
+              key={item.conv.id}
+              onPress={() => onOpenConversation(item.conv.id)}
+              style={({ pressed }) => [
+                styles.row,
+                pressed && styles.rowPressed,
+              ]}
+            >
+              <View style={styles.rowMain}>
+                <Text style={styles.rowName} numberOfLines={1}>
+                  {item.otherNickname}
+                </Text>
+                {item.excerpt ? (
+                  <Text style={styles.rowExcerpt} numberOfLines={1}>
+                    {item.excerpt}
+                  </Text>
+                ) : null}
+              </View>
+              <Text style={styles.rowTime}>{relTime(item.lastTime)}</Text>
+            </Pressable>
+          ))
+        )}
+      </ScrollView>
+      <View style={bottomBarStyles.bar}>
+        <SizeButtons
+          textSizeStep={textSizeStep}
+          onChangeTextSize={onChangeTextSize}
+        />
+        <NavButton position="right" onPress={onBack} icon="←" />
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function createConversationListStyles(scale: number) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: PALETTE.bg },
+    scrollFlex: { flex: 1 },
+    titleArea: {
+      paddingTop: 4,
+      paddingBottom: 16,
+    },
+    title: {
+      color: '#FFFFFF',
+      fontSize: 15 * scale,
+      lineHeight: 22 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+      paddingHorizontal: 24,
+    },
+    scrollContent: {
+      paddingBottom: SCROLL_BOTTOM_PADDING,
+      paddingHorizontal: 14,
+    },
+    empty: {
+      color: PALETTE.textMuted,
+      fontSize: 12 * scale,
+      textAlign: 'center',
+      paddingTop: 60,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: 'rgba(255,255,255,0.05)',
+    },
+    rowPressed: {
+      backgroundColor: PALETTE.cardPressed,
+    },
+    rowMain: {
+      flex: 1,
+      marginRight: 10,
+    },
+    rowName: {
+      color: '#FFFFFF',
+      fontSize: 13 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    rowExcerpt: {
+      color: PALETTE.textMuted,
+      fontSize: 11 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+      marginTop: 3,
+      opacity: 0.9,
+    },
+    rowTime: {
+      color: PALETTE.textMuted,
+      fontSize: 11 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+    },
+  });
 }
 
 function PostDetailScreen({
@@ -736,50 +1550,61 @@ function PostDetailScreen({
   onChangeTextSize,
   postId,
   viewerLanguage,
+  localPosts,
+  localReplies,
+  localInvites,
+  inviteStateByReply,
   onBack,
   onOpenProfile,
   onOpenConversation,
+  onOpenConversationById,
+  onOpenReplyCompose,
+  onSendInvite,
+  onAcceptInvite,
+  onDeclineInvite,
+  onWithdrawInvite,
 }: {
   scale: number;
   textSizeStep: TextSizeStep;
   onChangeTextSize: (delta: number) => void;
   postId: string;
   viewerLanguage: Language;
+  localPosts: SeedPost[];
+  localReplies: Record<string, SeedReply[]>;
+  localInvites: Record<string, ConversationInvite>;
+  inviteStateByReply: Record<string, InviteUIState>;
   onBack: () => void;
   onOpenProfile: () => void;
   onOpenConversation: (postId: string, rootCommentId: string) => void;
+  onOpenConversationById: (conversationId: string) => void;
+  onOpenReplyCompose: (postId: string) => void;
+  onSendInvite: (
+    replyId: string,
+    receiverId: string,
+    postId: string,
+  ) => Promise<boolean>;
+  onAcceptInvite: (replyId: string) => Promise<boolean>;
+  onDeclineInvite: (replyId: string) => Promise<boolean>;
+  onWithdrawInvite: (replyId: string) => Promise<boolean>;
 }) {
   const styles = useMemo(() => createPostDetailStyles(scale), [scale]);
   const post = useMemo(() => {
-    const found = SEED_POSTS.find((p) => p.postId === postId);
+    const found =
+      SEED_POSTS.find((p) => p.postId === postId) ??
+      localPosts.find((p) => p.postId === postId);
     if (!found) return undefined;
     if (!isPostVisibleIn(found, viewerLanguage)) return undefined;
     return found;
-  }, [postId, viewerLanguage]);
-  const visibleReplies = useMemo(
-    () =>
-      (post?.replies ?? []).filter((r) =>
-        isReplyVisibleIn(r, viewerLanguage),
-      ),
-    [post, viewerLanguage],
-  );
-
-  const [localInvites, setLocalInvites] = useState<
-    Record<string, ConversationInvite>
-  >({});
-
-  const handleSendInvite = (replyId: string) => {
-    const newInvite: ConversationInvite = {
-      inviteId: `local_inv_${Date.now()}`,
-      userId: CURRENT_USER_ID ?? 'm_01',
-      originalLanguage: 'ko',
-      originalContent:
-        '괜찮다면 이 문장을 계기로 조금 더 천천히 이야기 나눠보고 싶어요.',
-      createdAt: new Date().toISOString(),
-      isSample: true,
-    };
-    setLocalInvites((prev) => ({ ...prev, [replyId]: newInvite }));
-  };
+  }, [postId, viewerLanguage, localPosts]);
+  const visibleReplies = useMemo(() => {
+    const seedR = (post?.replies ?? []).filter((r) =>
+      isReplyVisibleIn(r, viewerLanguage),
+    );
+    const localR = (localReplies[postId] ?? []).filter((r) =>
+      isReplyVisibleIn(r, viewerLanguage),
+    );
+    return [...seedR, ...localR];
+  }, [post, viewerLanguage, localReplies, postId]);
 
   const displayedReplies = useMemo(
     () =>
@@ -840,8 +1665,13 @@ function PostDetailScreen({
                   viewerLanguage={viewerLanguage}
                   postId={post.postId}
                   postAuthorId={post.userId}
+                  inviteState={inviteStateByReply[reply.replyId]}
                   onOpenConversation={onOpenConversation}
-                  onSendInvite={handleSendInvite}
+                  onOpenConversationById={onOpenConversationById}
+                  onSendInvite={onSendInvite}
+                  onAcceptInvite={onAcceptInvite}
+                  onDeclineInvite={onDeclineInvite}
+                  onWithdrawInvite={onWithdrawInvite}
                 />
               ))}
             </View>
@@ -853,6 +1683,16 @@ function PostDetailScreen({
 
       <View style={bottomBarStyles.bar}>
         <SizeButtons textSizeStep={textSizeStep} onChangeTextSize={onChangeTextSize} />
+        <Pressable
+          onPress={() => onOpenReplyCompose(postId)}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.composeBtn,
+            pressed && styles.composeBtnPressed,
+          ]}
+        >
+          <Text style={styles.composeBtnText}>답글 남기기</Text>
+        </Pressable>
         <NavButton position="right" onPress={onBack} icon="←" />
       </View>
     </SafeAreaView>
@@ -865,17 +1705,32 @@ function ReplyRow({
   viewerLanguage,
   postId,
   postAuthorId,
+  inviteState,
   onOpenConversation,
+  onOpenConversationById,
   onSendInvite,
+  onAcceptInvite,
+  onDeclineInvite,
+  onWithdrawInvite,
 }: {
   reply: SeedReply;
   styles: ReturnType<typeof createPostDetailStyles>;
   viewerLanguage: Language;
   postId: string;
   postAuthorId: string;
+  inviteState?: InviteUIState;
   onOpenConversation: (postId: string, rootCommentId: string) => void;
-  onSendInvite: (replyId: string) => void;
+  onOpenConversationById: (conversationId: string) => void;
+  onSendInvite: (
+    replyId: string,
+    receiverId: string,
+    postId: string,
+  ) => Promise<boolean>;
+  onAcceptInvite: (replyId: string) => Promise<boolean>;
+  onDeclineInvite: (replyId: string) => Promise<boolean>;
+  onWithdrawInvite: (replyId: string) => Promise<boolean>;
 }) {
+  const currentUserId = useCurrentUserId();
   const author = USER_MAP[reply.userId];
   const resolved = resolveContent({
     targetType: 'reply',
@@ -887,8 +1742,9 @@ function ReplyRow({
   });
 
   const canInvite =
-    CURRENT_USER_ID === postAuthorId &&
-    CURRENT_USER_ID !== reply.userId &&
+    !!currentUserId &&
+    currentUserId === postAuthorId &&
+    currentUserId !== reply.userId &&
     !reply.conversationInvite;
 
   return (
@@ -913,13 +1769,20 @@ function ReplyRow({
             postAuthorId={postAuthorId}
             replyAuthorId={reply.userId}
             rootCommentId={reply.replyId}
+            inviteState={inviteState}
             onOpenConversation={onOpenConversation}
+            onOpenConversationById={onOpenConversationById}
+            onAcceptInvite={onAcceptInvite}
+            onDeclineInvite={onDeclineInvite}
+            onWithdrawInvite={onWithdrawInvite}
           />
         ) : null}
 
-        {canInvite ? (
+        {canInvite && !inviteState ? (
           <Pressable
-            onPress={() => onSendInvite(reply.replyId)}
+            onPress={() => {
+              void onSendInvite(reply.replyId, reply.userId, postId);
+            }}
             hitSlop={8}
             style={({ pressed }) => [
               styles.inviteCta,
@@ -941,7 +1804,12 @@ function InviteBlock({
   postAuthorId,
   replyAuthorId,
   rootCommentId,
+  inviteState,
   onOpenConversation,
+  onOpenConversationById,
+  onAcceptInvite,
+  onDeclineInvite,
+  onWithdrawInvite,
 }: {
   invite: ConversationInvite;
   styles: ReturnType<typeof createPostDetailStyles>;
@@ -949,14 +1817,33 @@ function InviteBlock({
   postAuthorId: string;
   replyAuthorId: string;
   rootCommentId: string;
+  inviteState?: InviteUIState;
   onOpenConversation: (postId: string, rootCommentId: string) => void;
+  onOpenConversationById: (conversationId: string) => void;
+  onAcceptInvite: (replyId: string) => Promise<boolean>;
+  onDeclineInvite: (replyId: string) => Promise<boolean>;
+  onWithdrawInvite: (replyId: string) => Promise<boolean>;
 }) {
+  const currentUserId = useCurrentUserId();
   const author = USER_MAP[invite.userId];
-  const canJoin =
-    CURRENT_USER_ID === replyAuthorId && !invite.conversationJoin;
-  const canContinue =
+
+  // 시드 invite 경로: 기존 conversationJoin 기반 분기 유지.
+  // 새 invite 경로: inviteState.status 분기.
+  const isSender = !!currentUserId && currentUserId === invite.userId;
+  const isReceiver = !!currentUserId && currentUserId === replyAuthorId;
+  const status: ConversationInviteStatus | null = inviteState?.status ?? null;
+  const conversationId = inviteState?.conversationId ?? null;
+
+  const seedCanJoin =
+    !inviteState &&
+    !!currentUserId &&
+    currentUserId === replyAuthorId &&
+    !invite.conversationJoin;
+  const seedCanContinue =
+    !inviteState &&
     !!invite.conversationJoin &&
-    (CURRENT_USER_ID === postAuthorId || CURRENT_USER_ID === replyAuthorId);
+    !!currentUserId &&
+    (currentUserId === postAuthorId || currentUserId === replyAuthorId);
 
   return (
     <View style={styles.invite}>
@@ -972,11 +1859,12 @@ function InviteBlock({
       </View>
       <Text style={styles.inviteText}>{invite.originalContent}</Text>
 
-      {invite.conversationJoin ? (
+      {invite.conversationJoin && !inviteState ? (
         <JoinBlock join={invite.conversationJoin} styles={styles} />
       ) : null}
 
-      {canJoin ? (
+      {/* 시드 경로 — 기존 대화참여 stub */}
+      {seedCanJoin ? (
         <Pressable
           onPress={() =>
             Alert.alert('대화참여', '대화참여 기능은 곧 추가됩니다.')
@@ -990,8 +1878,7 @@ function InviteBlock({
           <Text style={styles.joinCtaText}>대화참여</Text>
         </Pressable>
       ) : null}
-
-      {canContinue ? (
+      {seedCanContinue ? (
         <Pressable
           onPress={() => onOpenConversation(postId, rootCommentId)}
           hitSlop={8}
@@ -1002,6 +1889,78 @@ function InviteBlock({
         >
           <Text style={styles.continueCtaText}>대화 이어가기</Text>
         </Pressable>
+      ) : null}
+
+      {/* 새 경로 — inviteState.status 분기 */}
+      {status === 'pending' && isReceiver ? (
+        <View style={styles.inviteActions}>
+          <Text style={styles.inviteStatusHint}>대화 초대 받음</Text>
+          <View style={styles.inviteActionRow}>
+            <Pressable
+              onPress={() => {
+                void onAcceptInvite(rootCommentId);
+              }}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.continueCta,
+                pressed && styles.ctaPressed,
+              ]}
+            >
+              <Text style={styles.continueCtaText}>수락</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                void onDeclineInvite(rootCommentId);
+              }}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.joinCta,
+                pressed && styles.ctaPressed,
+              ]}
+            >
+              <Text style={styles.joinCtaText}>거절</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
+      {status === 'pending' && isSender ? (
+        <View style={styles.inviteActions}>
+          <Text style={styles.inviteStatusHint}>초대 보냄</Text>
+          <Pressable
+            onPress={() => {
+              void onWithdrawInvite(rootCommentId);
+            }}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.joinCta,
+              pressed && styles.ctaPressed,
+            ]}
+          >
+            <Text style={styles.joinCtaText}>초대 취소</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {status === 'accepted' && conversationId ? (
+        <Pressable
+          onPress={() => onOpenConversationById(conversationId)}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.continueCta,
+            pressed && styles.ctaPressed,
+          ]}
+        >
+          <Text style={styles.continueCtaText}>대화 이어가기</Text>
+        </Pressable>
+      ) : null}
+
+      {status === 'declined' && isSender ? (
+        <Text style={styles.inviteStatusHint}>거절됨</Text>
+      ) : null}
+
+      {status === 'withdrawn' && isSender ? (
+        <Text style={styles.inviteStatusHint}>초대 취소됨</Text>
       ) : null}
     </View>
   );
@@ -1051,6 +2010,7 @@ function ConversationScreen({
   onLeave: (conversationId: string) => void;
 }) {
   const styles = useMemo(() => createConversationStyles(scale), [scale]);
+  const currentUserId = useCurrentUserId();
   const [draft, setDraft] = useState('');
   const [extraMessages, setExtraMessages] = useState<SeedMessage[]>([]);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -1075,10 +2035,10 @@ function ConversationScreen({
   const counterpart = useMemo(() => {
     if (!conversation) return undefined;
     const otherId = conversation.participants.find(
-      (p) => p !== CURRENT_USER_ID,
+      (p) => p !== currentUserId,
     );
     return otherId ? USER_MAP[otherId] : undefined;
-  }, [conversation]);
+  }, [conversation, currentUserId]);
 
   const scrollRef = useRef<ScrollView>(null);
 
@@ -1110,10 +2070,30 @@ function ConversationScreen({
       Alert.alert('메시지 확인', validation.reason ?? '');
       return;
     }
+    if (!currentUserId) {
+      Alert.alert('잠시만요', '먼저 본인 확인을 완료해 주세요.');
+      return;
+    }
+    const userId = currentUserId;
+    if (isWriteBlocked(userId)) {
+      Alert.alert('잠시만요', '잠시 쉬었다가 다시 이어가 주세요.');
+      return;
+    }
+    const safety = checkSafety(draft.trim(), 'message');
+    if (!safety.ok) {
+      reportViolation({
+        userId,
+        context: 'message',
+        result: safety,
+        rawText: draft.trim(),
+      });
+      Alert.alert('잠시만요', safety.hint ?? '');
+      return;
+    }
     const newMsg: SeedMessage = {
       messageId: `local_${Date.now()}`,
       conversationId,
-      senderId: CURRENT_USER_ID ?? 'm_01',
+      senderId: currentUserId,
       originalLanguage: 'ko',
       originalContent: draft.trim(),
       createdAt: new Date().toISOString(),
@@ -1127,10 +2107,14 @@ function ConversationScreen({
   };
 
   const requestDisclosure = (kind: DisclosureKind) => {
+    if (!currentUserId) {
+      Alert.alert('잠시만요', '먼저 본인 확인을 완료해 주세요.');
+      return;
+    }
     const newMsg: SeedMessage = {
       messageId: `local_${Date.now()}`,
       conversationId,
-      senderId: CURRENT_USER_ID ?? 'm_01',
+      senderId: currentUserId,
       originalLanguage: 'ko',
       originalContent: DISCLOSURE_REQUEST_LINE[kind],
       createdAt: new Date().toISOString(),
@@ -1146,11 +2130,15 @@ function ConversationScreen({
 
   const handleAcceptDisclosure = (request: SeedMessage) => {
     if (!request.disclosureKind) return;
+    if (!currentUserId) {
+      Alert.alert('잠시만요', '먼저 본인 확인을 완료해 주세요.');
+      return;
+    }
     const now = Date.now();
     const acceptMsg: SeedMessage = {
       messageId: `local_${now}`,
       conversationId,
-      senderId: CURRENT_USER_ID ?? 'm_01',
+      senderId: currentUserId,
       originalLanguage: 'ko',
       originalContent: DISCLOSURE_ACCEPT_LINE,
       createdAt: new Date(now).toISOString(),
@@ -1177,10 +2165,14 @@ function ConversationScreen({
 
   const handleDeclineDisclosure = (request: SeedMessage) => {
     if (!request.disclosureKind) return;
+    if (!currentUserId) {
+      Alert.alert('잠시만요', '먼저 본인 확인을 완료해 주세요.');
+      return;
+    }
     const declineMsg: SeedMessage = {
       messageId: `local_${Date.now()}`,
       conversationId,
-      senderId: CURRENT_USER_ID ?? 'm_01',
+      senderId: currentUserId,
       originalLanguage: 'ko',
       originalContent: DISCLOSURE_DECLINE_LINE,
       createdAt: new Date().toISOString(),
@@ -1276,12 +2268,12 @@ function ConversationScreen({
             const isLast = idx === messages.length - 1;
             const isRegular = m.kind === undefined || m.kind === 'text';
             const canDelete =
-              isLast && isRegular && m.senderId === CURRENT_USER_ID;
+              isLast && isRegular && m.senderId === currentUserId;
             let onAccept: (() => void) | undefined;
             let onDecline: (() => void) | undefined;
             if (
               m.kind === 'disclosure_request' &&
-              m.senderId !== CURRENT_USER_ID
+              m.senderId !== currentUserId
             ) {
               const subsequent = messages.slice(idx + 1);
               const resolved = subsequent.some(
@@ -1299,7 +2291,7 @@ function ConversationScreen({
               <MessageBubble
                 key={m.messageId}
                 message={m}
-                myId={CURRENT_USER_ID}
+                myId={currentUserId}
                 styles={styles}
                 onDelete={canDelete ? () => handleDelete(m.messageId) : undefined}
                 onAcceptDisclosure={onAccept}
@@ -1347,12 +2339,23 @@ function ConversationScreen({
 
 const PROFILE_REGION_OPTIONS = [
   '서울',
-  '경기·인천',
+  '경기',
+  '인천',
   '부산',
   '대구',
-  '대전·충청',
-  '광주·전라',
-  '그 외',
+  '광주',
+  '대전',
+  '울산',
+  '세종',
+  '충북',
+  '충남',
+  '전북',
+  '전남',
+  '경북',
+  '경남',
+  '강원',
+  '제주',
+  '전국',
 ] as const;
 
 const PROFILE_LANGUAGE_OPTIONS: ReadonlyArray<{ code: string; label: string }> = [
@@ -1395,12 +2398,15 @@ function ProfileSetupScreen({
   textSizeStep,
   onChangeTextSize,
   onBack,
+  onOpenConversationList,
 }: {
   scale: number;
   textSizeStep: TextSizeStep;
   onChangeTextSize: (delta: number) => void;
   onBack: () => void;
+  onOpenConversationList?: () => void;
 }) {
+  const currentUserId = useCurrentUserId();
   const styles = useMemo(() => createProfileSetupStyles(scale), [scale]);
   const [nickname, setNickname] = useState('');
   const [countryCode, setCountryCode] = useState('+82');
@@ -1529,7 +2535,7 @@ function ProfileSetupScreen({
   };
 
   const conversationList = useMemo(() => {
-    const meId = CURRENT_USER_ID ?? '';
+    const meId = currentUserId ?? '';
     return SEED_CONVERSATIONS.filter((c) => c.participants.includes(meId))
       .slice()
       .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
@@ -1541,7 +2547,7 @@ function ProfileSetupScreen({
       .filter(
         (x): x is { conv: SeedConversation; user: SeedUser } => x !== null,
       );
-  }, []);
+  }, [currentUserId]);
 
   const visibleConvList = useMemo(
     () =>
@@ -1569,6 +2575,21 @@ function ProfileSetupScreen({
   return (
     <SafeAreaView style={styles.safe}>
       <BrandHeader />
+
+      {onOpenConversationList && currentUserId ? (
+        <View style={styles.topActions}>
+          <Pressable
+            onPress={onOpenConversationList}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.topAction,
+              pressed && styles.topActionPressed,
+            ]}
+          >
+            <Text style={styles.topActionText}>대화</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView
         style={styles.kav}
@@ -2170,6 +3191,26 @@ function createProfileSetupStyles(scale: number) {
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: PALETTE.bg },
     kav: { flex: 1 },
+    topActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      paddingHorizontal: 20,
+      paddingTop: 2,
+      paddingBottom: 4,
+    },
+    topAction: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    topActionPressed: {
+      opacity: 0.5,
+    },
+    topActionText: {
+      color: PALETTE.inviteAccent,
+      fontSize: 12 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.5,
+    },
     content: {
       flex: 1,
       paddingHorizontal: 20,
@@ -2180,7 +3221,7 @@ function createProfileSetupStyles(scale: number) {
       marginBottom: 10,
     },
     label: {
-      color: '#8fd9b6',
+      color: PALETTE.labelAccent,
       fontSize: 10 * scale,
       fontWeight: '500',
       letterSpacing: 0.5,
@@ -2326,7 +3367,7 @@ function createProfileSetupStyles(scale: number) {
       letterSpacing: 0.2,
     },
     dropdownTextSel: {
-      color: '#8fd9b6',
+      color: PALETTE.labelAccent,
       fontWeight: '500',
     },
     photoRow: {
@@ -2868,7 +3909,7 @@ function createMainStyles(scale: number) {
       backgroundColor: PALETTE.bg,
     },
     prompt: {
-      color: '#FFFFFF',
+      color: PALETTE.labelAccent,
       fontSize: 14 * scale,
       lineHeight: 22 * scale,
       fontWeight: '400',
@@ -2999,6 +4040,29 @@ function createCategoryStyles(scale: number) {
       textAlign: 'center',
       paddingHorizontal: 32,
       marginTop: 48,
+    },
+    composeBtn: {
+      position: 'absolute',
+      bottom: BOTTOM_BUTTON_OFFSET,
+      left: '50%',
+      transform: [{ translateX: -55 }],
+      width: 110,
+      height: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 16,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.inviteAccent,
+      backgroundColor: 'transparent',
+    },
+    composeBtnPressed: {
+      opacity: 0.5,
+    },
+    composeBtnText: {
+      color: PALETTE.inviteAccent,
+      fontSize: 12 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.5,
     },
   });
 }
@@ -3233,6 +4297,44 @@ function createPostDetailStyles(scale: number) {
       fontSize: 14 * scale,
       textAlign: 'center',
       paddingTop: 60,
+    },
+    composeBtn: {
+      position: 'absolute',
+      bottom: BOTTOM_BUTTON_OFFSET,
+      left: '50%',
+      transform: [{ translateX: -55 }],
+      width: 110,
+      height: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 16,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.inviteAccent,
+      backgroundColor: 'transparent',
+    },
+    composeBtnPressed: {
+      opacity: 0.5,
+    },
+    composeBtnText: {
+      color: PALETTE.inviteAccent,
+      fontSize: 12 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.5,
+    },
+    inviteActions: {
+      marginTop: 4,
+    },
+    inviteActionRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 6,
+    },
+    inviteStatusHint: {
+      color: PALETTE.textMuted,
+      fontSize: 11 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.3,
+      marginTop: 4,
     },
   });
 }

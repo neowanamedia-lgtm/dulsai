@@ -98,14 +98,45 @@ export type DbPostComment = {
 };
 
 // ──────────────────────────────────────────────────────────────────────────
+// conversation_invites
+// (sender_id, reply_id) 가 unique. status 4종.
+// ──────────────────────────────────────────────────────────────────────────
+export type ConversationInviteStatus =
+  | 'pending'
+  | 'accepted'
+  | 'declined'
+  | 'withdrawn';
+
+export type DbConversationInvite = {
+  id: string;
+  post_id: string;
+  reply_id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  status: ConversationInviteStatus;
+  created_at: Iso;
+  responded_at: Iso | null;
+};
+
+export type DbConversationInviteInsert = Partial<DbConversationInvite> & {
+  post_id: string;
+  reply_id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+};
+export type DbConversationInviteUpdate = Partial<DbConversationInvite>;
+
+// ──────────────────────────────────────────────────────────────────────────
 // 미생성 테이블 (임시 타입, Database 스키마 비등록)
 // ──────────────────────────────────────────────────────────────────────────
 export type DbConversation = {
   id: string;
   post_id: string;
-  root_comment_id: string | null;
-  inviter_user_id: string;
-  invited_user_id: string;
+  invite_id: string | null;
+  user_a_id: string;
+  user_b_id: string;
   status: ConversationStatus;
   last_message_at: Iso | null;
   created_at: Iso;
@@ -173,8 +204,8 @@ export type DbPostCommentUpdate = Partial<DbPostComment>;
 // 미생성 테이블용 - 인터페이스 유지만.
 export type DbConversationInsert = Partial<DbConversation> & {
   post_id: string;
-  inviter_user_id: string;
-  invited_user_id: string;
+  user_a_id: string;
+  user_b_id: string;
 };
 export type DbConversationUpdate = Partial<DbConversation>;
 
@@ -225,6 +256,18 @@ export type Database = {
         Row: DbPostComment;
         Insert: DbPostCommentInsert;
         Update: DbPostCommentUpdate;
+        Relationships: [];
+      };
+      conversation_invites: {
+        Row: DbConversationInvite;
+        Insert: DbConversationInviteInsert;
+        Update: DbConversationInviteUpdate;
+        Relationships: [];
+      };
+      conversations: {
+        Row: DbConversation;
+        Insert: DbConversationInsert;
+        Update: DbConversationUpdate;
         Relationships: [];
       };
     };
