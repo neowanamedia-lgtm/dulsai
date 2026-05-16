@@ -15,6 +15,25 @@ export type SeedUser = {
   isSample: true;
 };
 
+export type ConversationJoin = {
+  joinId: string;
+  userId: string;
+  originalLanguage: Language;
+  originalContent: string;
+  createdAt: string;
+  isSample: true;
+};
+
+export type ConversationInvite = {
+  inviteId: string;
+  userId: string;
+  originalLanguage: Language;
+  originalContent: string;
+  createdAt: string;
+  isSample: true;
+  conversationJoin?: ConversationJoin;
+};
+
 export type SeedReply = {
   replyId: string;
   userId: string;
@@ -23,6 +42,7 @@ export type SeedReply = {
   createdAt: string;
   updatedAt?: string;
   isSample: true;
+  conversationInvite?: ConversationInvite;
 };
 
 export type SeedPost = {
@@ -35,6 +55,41 @@ export type SeedPost = {
   updatedAt?: string;
   isSample: true;
   replies: SeedReply[];
+};
+
+export type SeedConversationStatus = 'active' | 'blocked' | 'closed';
+
+export type SeedConversation = {
+  conversationId: string;
+  postId: string;
+  rootCommentId: string;
+  inviterUserId: string;
+  invitedUserId: string;
+  participants: [string, string];
+  createdAt: string;
+  lastMessageAt: string;
+  status: SeedConversationStatus;
+  isSample: true;
+};
+
+export type DisclosureKind = 'region' | 'age' | 'photo' | 'contact';
+export type MessageKind =
+  | 'text'
+  | 'disclosure_request'
+  | 'disclosure_accepted'
+  | 'disclosure_declined'
+  | 'disclosure_info';
+
+export type SeedMessage = {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  originalLanguage: Language;
+  originalContent: string;
+  createdAt: string;
+  isSample: true;
+  kind?: MessageKind;
+  disclosureKind?: DisclosureKind;
 };
 
 export type SeedTranslation = {
@@ -105,7 +160,7 @@ export const SEED_POSTS: SeedPost[] = [
     replies: [
       { replyId: 'r001', userId: 'f_07', originalLanguage: 'ko', originalContent: '단무지 좋아하는 사람들이 들으면 어이없어할 댓글이지만 저도 단무지 빼파라서 격하게 공감합니다.', createdAt: '2026-05-16T15:01:00+09:00', isSample: true },
       { replyId: 'r002', userId: 'm_05', originalLanguage: 'ko', originalContent: '저는 빼달라고 했는데 오히려 두 개 들어있던 적 있어요. 사과의 의미였는지 뭐였는지.', createdAt: '2026-05-16T15:48:00+09:00', isSample: true },
-      { replyId: 'r003', userId: 'f_05', originalLanguage: 'ko', originalContent: '그런 게 자꾸 쌓이면 단골 되는 거잖아요. 좋아 보여요.', createdAt: '2026-05-16T17:12:00+09:00', isSample: true },
+      { replyId: 'r003', userId: 'f_05', originalLanguage: 'ko', originalContent: '그런 게 자꾸 쌓이면 단골 되는 거잖아요. 좋아 보여요.', createdAt: '2026-05-16T17:12:00+09:00', isSample: true, conversationInvite: { inviteId: 'inv_001', userId: 'm_01', originalLanguage: 'ko', originalContent: '그렇게 봐주셔서 고맙습니다. 괜찮다면 이 문장을 계기로 조금 더 천천히 이야기 나눠보고 싶어요.', createdAt: '2026-05-16T19:48:00+09:00', isSample: true, conversationJoin: { joinId: 'jon_001', userId: 'f_05', originalLanguage: 'ko', originalContent: '좋아요. 가볍게라도 천천히 이야기 이어가 봐요.', createdAt: '2026-05-16T22:14:00+09:00', isSample: true } } },
     ],
   },
   {
@@ -146,7 +201,7 @@ export const SEED_POSTS: SeedPost[] = [
     isSample: true,
     replies: [
       { replyId: 'r010', userId: 'f_06', originalLanguage: 'ko', originalContent: '그 감각 알 것 같아요. 슬프다고 부르기엔 너무 일상이고.', createdAt: '2026-05-15T20:18:00+09:00', isSample: true },
-      { replyId: 'r011', userId: 'm_01', originalLanguage: 'ko', originalContent: '저는 일부러 들어오기 전에 음악 틀어놓고 들어와요. 별거 아닌데 도움이 돼요.', createdAt: '2026-05-15T20:55:00+09:00', isSample: true },
+      { replyId: 'r011', userId: 'm_01', originalLanguage: 'ko', originalContent: '저는 일부러 들어오기 전에 음악 틀어놓고 들어와요. 별거 아닌데 도움이 돼요.', createdAt: '2026-05-15T20:55:00+09:00', isSample: true, conversationInvite: { inviteId: 'inv_002', userId: 'f_01', originalLanguage: 'ko', originalContent: '그 방법, 저도 한번 해보려고요. 괜찮다면 이 문장을 계기로 조금 더 이야기 나눠보고 싶어요.', createdAt: '2026-05-15T23:42:00+09:00', isSample: true } },
       { replyId: 'r012', userId: 'f_10', originalLanguage: 'ko', originalContent: '혼자 사는 게 익숙해진다는 건 그런 순간들에 무뎌지는 거더라고요.', createdAt: '2026-05-15T22:01:00+09:00', isSample: true },
     ],
   },
@@ -228,7 +283,7 @@ export const SEED_POSTS: SeedPost[] = [
     createdAt: '2026-05-14T11:42:00+09:00',
     isSample: true,
     replies: [
-      { replyId: 'r027', userId: 'f_06', originalLanguage: 'ko', originalContent: '이거 진짜 동의. 침묵을 못 견디는 관계는 어딘가 피곤해요.', createdAt: '2026-05-14T12:35:00+09:00', isSample: true },
+      { replyId: 'r027', userId: 'f_06', originalLanguage: 'ko', originalContent: '이거 진짜 동의. 침묵을 못 견디는 관계는 어딘가 피곤해요.', createdAt: '2026-05-14T12:35:00+09:00', isSample: true, conversationInvite: { inviteId: 'inv_003', userId: 'm_02', originalLanguage: 'ko', originalContent: '이 문장에 같은 결로 답해주신 게 반가웠어요. 이 문장을 계기로 조금 더 이야기 나눠보고 싶어요.', createdAt: '2026-05-14T15:22:00+09:00', isSample: true, conversationJoin: { joinId: 'jon_003', userId: 'f_06', originalLanguage: 'ko', originalContent: '그렇게 말씀해주셔서 좋습니다. 급할 거 없이 천천히 이어가 봐요.', createdAt: '2026-05-14T17:08:00+09:00', isSample: true } } },
       { replyId: 'r028', userId: 'm_05', originalLanguage: 'ko', originalContent: '근데 침묵이 편하려면 시간이 좀 필요한 거 같아요. 처음부터는 안 되더라고요.', createdAt: '2026-05-14T13:48:00+09:00', isSample: true },
       { replyId: 'r029', userId: 'f_05', originalLanguage: 'ko', originalContent: '그래서 오래된 친구가 좋아요.', createdAt: '2026-05-14T15:22:00+09:00', isSample: true },
     ],
@@ -326,7 +381,7 @@ export const SEED_POSTS: SeedPost[] = [
     isSample: true,
     replies: [
       { replyId: 'r047', userId: 'f_05', originalLanguage: 'ko', originalContent: '엄마는 별 뜻 없이 하신 말씀일 텐데, 그런 게 오래 남아요.', createdAt: '2026-05-12T20:11:00+09:00', isSample: true },
-      { replyId: 'r048', userId: 'm_01', originalLanguage: 'ko', originalContent: '어른이 된다는 게 좀 그런 거 같습니다. 잘 안 웃는 사람이 되는 거.', createdAt: '2026-05-12T21:34:00+09:00', isSample: true },
+      { replyId: 'r048', userId: 'm_01', originalLanguage: 'ko', originalContent: '어른이 된다는 게 좀 그런 거 같습니다. 잘 안 웃는 사람이 되는 거.', createdAt: '2026-05-12T21:34:00+09:00', isSample: true, conversationInvite: { inviteId: 'inv_004', userId: 'f_06', originalLanguage: 'ko', originalContent: '오래 머무는 문장이었어요. 이 문장을 계기로 한두 마디 더 나눠보고 싶습니다.', createdAt: '2026-05-13T08:14:00+09:00', isSample: true, conversationJoin: { joinId: 'jon_004', userId: 'm_01', originalLanguage: 'ko', originalContent: '그렇게 봐주신 것만으로도 감사합니다. 천천히 답해도 괜찮다면 이어가 보고 싶어요.', createdAt: '2026-05-13T11:45:00+09:00', isSample: true } } },
       { replyId: 'r049', userId: 'f_02', originalLanguage: 'ko', originalContent: '다시 잘 웃기 시작하는 시기도 있어요. 시간이 좀 걸려요.', createdAt: '2026-05-12T22:48:00+09:00', isSample: true },
     ],
   },
@@ -759,4 +814,58 @@ export const SEED_TRANSLATIONS: SeedTranslation[] = [
   { translationId: 'tr_022', targetType: 'reply', targetId: 'r100', sourceLanguage: 'ko', targetLanguage: 'ja', translatedContent: 'その感覚、日本語ではどう呼ぶんですか? 韓国語にはぴったりの言葉がなくて。', provider: 'manual', status: 'completed', createdAt: '2026-05-14T20:02:00+09:00' },
   { translationId: 'tr_023', targetType: 'reply', targetId: 'r113', sourceLanguage: 'ko', targetLanguage: 'zh', translatedContent: '我对父亲也有类似的心债。我们这代男人,好像都是这样。', provider: 'manual', status: 'completed', createdAt: '2026-05-12T19:48:00+09:00' },
   { translationId: 'tr_024', targetType: 'reply', targetId: 'r124', sourceLanguage: 'ko', targetLanguage: 'es', translatedContent: 'Entrar a una casa con luz se siente distinto — esa frase me encantó. Yo también lo hago a veces.', provider: 'manual', status: 'completed', createdAt: '2026-05-11T08:28:00+09:00' },
+];
+
+export const SEED_CONVERSATIONS: SeedConversation[] = [
+  { conversationId: 'conv_001', postId: 'p001', rootCommentId: 'r003', inviterUserId: 'm_01', invitedUserId: 'f_05', participants: ['m_01', 'f_05'], createdAt: '2026-05-16T22:14:00+09:00', lastMessageAt: '2026-05-17T09:48:00+09:00', status: 'active', isSample: true },
+  { conversationId: 'conv_002', postId: 'p017', rootCommentId: 'r048', inviterUserId: 'f_06', invitedUserId: 'm_01', participants: ['f_06', 'm_01'], createdAt: '2026-05-13T11:45:00+09:00', lastMessageAt: '2026-05-13T18:22:00+09:00', status: 'active', isSample: true },
+  { conversationId: 'conv_003', postId: 'p010', rootCommentId: 'r027', inviterUserId: 'm_02', invitedUserId: 'f_06', participants: ['m_02', 'f_06'], createdAt: '2026-05-14T17:08:00+09:00', lastMessageAt: '2026-05-15T08:33:00+09:00', status: 'active', isSample: true },
+];
+
+export const SEED_MESSAGES: SeedMessage[] = [
+  { messageId: 'msg_001', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '여기로 이어주셔서 고맙습니다. 처음이라 그런지 한 줄 적기도 조심스러워지네요.', createdAt: '2026-05-16T22:48:00+09:00', isSample: true },
+  { messageId: 'msg_002', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '저도요. 글 아래보다 조금 더 천천히 말 걸어볼 수 있어서 다행이에요.', createdAt: '2026-05-17T08:12:00+09:00', isSample: true },
+  { messageId: 'msg_003', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '그러게요. 단무지 잘못 들어간 이야기로 시작했는데, 이렇게 이어질 줄은 몰랐어요.', createdAt: '2026-05-17T09:22:00+09:00', isSample: true },
+  { messageId: 'msg_004', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '그런 게 좋은 거 같아요. 별일 아닌 게 어떻게 한 자리에 데려다 놓는지.', createdAt: '2026-05-17T09:48:00+09:00', isSample: true },
+
+  { messageId: 'msg_005', conversationId: 'conv_002', senderId: 'f_06', originalLanguage: 'ko', originalContent: '이쪽으로 와주셔서 감사해요. 글 한 줄에서 이어진 건 처음이에요.', createdAt: '2026-05-13T12:08:00+09:00', isSample: true },
+  { messageId: 'msg_006', conversationId: 'conv_002', senderId: 'm_01', originalLanguage: 'ko', originalContent: '저도 처음이에요. 그래서 어떻게 시작해야 할지 몰라서, 인사부터 적어봅니다.', createdAt: '2026-05-13T14:33:00+09:00', isSample: true },
+  { messageId: 'msg_007', conversationId: 'conv_002', senderId: 'f_06', originalLanguage: 'ko', originalContent: '그 정도가 적당한 거 같아요. 천천히 가는 게 우리 둘 다 편할 거 같아요.', createdAt: '2026-05-13T18:22:00+09:00', isSample: true },
+
+  { messageId: 'msg_008', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '여기서 이어가게 됐네요. 그쪽 답글이 너무 정확해서 한 번 더 적게 됐어요.', createdAt: '2026-05-14T18:14:00+09:00', isSample: true },
+  { messageId: 'msg_009', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '그렇게 봐주셔서 좋아요. 글 결이 잘 맞는 사람과 이야기하는 게 드문 일이에요.', createdAt: '2026-05-14T20:42:00+09:00', isSample: true },
+  { messageId: 'msg_010', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '맞아요. 그래서 너무 서두르고 싶지 않아요. 천천히 가요.', createdAt: '2026-05-15T08:33:00+09:00', isSample: true },
+
+  { messageId: 'msg_011', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '괜찮다면 서로 지역을 슬쩍 열어볼까요?', createdAt: '2026-05-17T10:14:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'region' },
+  { messageId: 'msg_012', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '좋아요. 천천히 알아가는 거니까요.', createdAt: '2026-05-17T10:35:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'region' },
+  { messageId: 'msg_013', conversationId: 'conv_001', senderId: 'system', originalLanguage: 'ko', originalContent: '지역이 서로에게 열렸어요.', createdAt: '2026-05-17T10:35:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'region' },
+  { messageId: 'msg_014', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '꽤 가까운 동네라 신기했어요.', createdAt: '2026-05-17T13:22:00+09:00', isSample: true },
+  { messageId: 'msg_015', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '저도요. 의외인 게 의외로 가까이 있더라고요.', createdAt: '2026-05-17T14:08:00+09:00', isSample: true },
+  { messageId: 'msg_016', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '괜찮으면 나이도 같이 알려줄까요?', createdAt: '2026-05-17T18:42:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'age' },
+  { messageId: 'msg_017', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '그렇게 해요.', createdAt: '2026-05-17T19:18:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'age' },
+  { messageId: 'msg_018', conversationId: 'conv_001', senderId: 'system', originalLanguage: 'ko', originalContent: '나이가 서로에게 열렸어요.', createdAt: '2026-05-17T19:18:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'age' },
+  { messageId: 'msg_019', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '비슷한 또래라 더 편한 느낌이에요.', createdAt: '2026-05-17T21:48:00+09:00', isSample: true },
+  { messageId: 'msg_020', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '사진도 공유해볼까요?', createdAt: '2026-05-18T09:22:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'photo' },
+  { messageId: 'msg_021', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '좋아요. 부담스럽지 않게요.', createdAt: '2026-05-18T11:35:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'photo' },
+  { messageId: 'msg_022', conversationId: 'conv_001', senderId: 'system', originalLanguage: 'ko', originalContent: '사진이 서로에게 열렸어요.', createdAt: '2026-05-18T11:35:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'photo' },
+  { messageId: 'msg_023', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '사진 보고 더 편해진 것 같아요.', createdAt: '2026-05-18T14:48:00+09:00', isSample: true },
+  { messageId: 'msg_024', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '이제 연락처도 알려줄 수 있을까요?', createdAt: '2026-05-18T20:14:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'contact' },
+  { messageId: 'msg_025', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '좋아요. 천천히 시작해 봐요.', createdAt: '2026-05-18T22:38:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'contact' },
+  { messageId: 'msg_026', conversationId: 'conv_001', senderId: 'system', originalLanguage: 'ko', originalContent: '연락처가 서로에게 열렸어요.', createdAt: '2026-05-18T22:38:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'contact' },
+
+  { messageId: 'msg_027', conversationId: 'conv_002', senderId: 'f_06', originalLanguage: 'ko', originalContent: '괜찮다면 지역도 슬쩍 열어볼까요?', createdAt: '2026-05-13T20:08:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'region' },
+  { messageId: 'msg_028', conversationId: 'conv_002', senderId: 'm_01', originalLanguage: 'ko', originalContent: '좋아요. 가까운 곳이면 좋겠네요.', createdAt: '2026-05-13T22:14:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'region' },
+  { messageId: 'msg_029', conversationId: 'conv_002', senderId: 'system', originalLanguage: 'ko', originalContent: '지역이 서로에게 열렸어요.', createdAt: '2026-05-13T22:14:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'region' },
+  { messageId: 'msg_030', conversationId: 'conv_002', senderId: 'f_06', originalLanguage: 'ko', originalContent: '괜찮다면 나이도 같이 알려줄까요?', createdAt: '2026-05-14T08:42:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'age' },
+  { messageId: 'msg_031', conversationId: 'conv_002', senderId: 'm_01', originalLanguage: 'ko', originalContent: '조금 더 천천히 알아가고 싶어요.', createdAt: '2026-05-14T10:18:00+09:00', isSample: true, kind: 'disclosure_declined', disclosureKind: 'age' },
+
+  { messageId: 'msg_032', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '괜찮다면 서로 지역을 슬쩍 열어볼까요?', createdAt: '2026-05-15T11:22:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'region' },
+  { messageId: 'msg_033', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '좋아요.', createdAt: '2026-05-15T13:48:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'region' },
+  { messageId: 'msg_034', conversationId: 'conv_003', senderId: 'system', originalLanguage: 'ko', originalContent: '지역이 서로에게 열렸어요.', createdAt: '2026-05-15T13:48:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'region' },
+  { messageId: 'msg_035', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '나이도 같이 알려줄까요?', createdAt: '2026-05-15T17:22:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'age' },
+  { messageId: 'msg_036', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '그러죠.', createdAt: '2026-05-15T19:08:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'age' },
+  { messageId: 'msg_037', conversationId: 'conv_003', senderId: 'system', originalLanguage: 'ko', originalContent: '나이가 서로에게 열렸어요.', createdAt: '2026-05-15T19:08:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'age' },
+  { messageId: 'msg_038', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '이제 사진도 공유해볼까요?', createdAt: '2026-05-16T11:22:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'photo' },
+  { messageId: 'msg_039', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '좋아요. 천천히요.', createdAt: '2026-05-16T14:48:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'photo' },
+  { messageId: 'msg_040', conversationId: 'conv_003', senderId: 'system', originalLanguage: 'ko', originalContent: '사진이 서로에게 열렸어요.', createdAt: '2026-05-16T14:48:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'photo' },
 ];

@@ -1,23 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 
 import {
+  SEED_CONVERSATIONS,
+  SEED_MESSAGES,
   SEED_POSTS,
   SEED_TRANSLATIONS,
   SEED_USERS,
+  type ConversationInvite,
+  type ConversationJoin,
+  type DisclosureKind,
   type Language,
+  type SeedConversation,
+  type SeedMessage,
   type SeedPost,
   type SeedReply,
   type SeedTranslation,
@@ -154,7 +166,7 @@ const CATEGORIES: Category[] = [
 ];
 
 type TextSizeStep = 0 | 1 | 2 | 3;
-type Route = 'main' | 'category' | 'post' | 'profile';
+type Route = 'main' | 'category' | 'post' | 'profile' | 'conversation';
 
 const PALETTE = {
   bg: '#141210',
@@ -172,6 +184,10 @@ const PALETTE = {
   buttonBgDim: '#1a1815',
   profileMaleBg: '#3a5276',
   profileFemaleBg: '#a85f72',
+  inviteAccent: '#7daa97',
+  invitePanel: '#23211d',
+  bubbleMale: '#6f8298',
+  bubbleFemale: '#a88990',
 };
 
 const SCALES: Record<TextSizeStep, number> = {
@@ -185,6 +201,57 @@ const BOTTOM_BUTTON_HEIGHT = 32;
 const BOTTOM_BUTTON_OFFSET = 14;
 const BOTTOM_BAR_HEIGHT = BOTTOM_BUTTON_HEIGHT + BOTTOM_BUTTON_OFFSET + 14;
 const SCROLL_BOTTOM_PADDING = 10;
+
+const CURRENT_USER_ID: string | null = 'm_01';
+
+const DISCLOSURE_LABEL: Record<DisclosureKind, string> = {
+  region: '지역',
+  age: '나이',
+  photo: '사진',
+  contact: '연락처',
+};
+
+const DISCLOSURE_REQUEST_LINE: Record<DisclosureKind, string> = {
+  region: '괜찮다면 서로 지역을 슬쩍 열어볼까요?',
+  age: '괜찮으면 나이도 같이 알려줄까요?',
+  photo: '사진도 공유해볼까요?',
+  contact: '이제 연락처도 알려줄 수 있을까요?',
+};
+
+const DISCLOSURE_INFO_LINE: Record<DisclosureKind, string> = {
+  region: '지역이 서로에게 열렸어요.',
+  age: '나이가 서로에게 열렸어요.',
+  photo: '사진이 서로에게 열렸어요.',
+  contact: '연락처가 서로에게 열렸어요.',
+};
+
+const DISCLOSURE_ACCEPT_LINE = '좋아요. 천천히요.';
+const DISCLOSURE_DECLINE_LINE = '조금 더 천천히 알아가고 싶어요.';
+
+const STAGE_ORDER: DisclosureKind[] = ['region', 'age', 'photo', 'contact'];
+
+function computeNextStage(messages: SeedMessage[]): DisclosureKind | null {
+  const unresolved = messages.some(
+    (m) =>
+      m.kind === 'disclosure_request' &&
+      !messages.some(
+        (s) =>
+          (s.kind === 'disclosure_accepted' ||
+            s.kind === 'disclosure_declined') &&
+          s.disclosureKind === m.disclosureKind,
+      ),
+  );
+  if (unresolved) return null;
+  const anyDeclined = messages.some((m) => m.kind === 'disclosure_declined');
+  if (anyDeclined) return null;
+  for (const stage of STAGE_ORDER) {
+    const done = messages.some(
+      (m) => m.kind === 'disclosure_info' && m.disclosureKind === stage,
+    );
+    if (!done) return stage;
+  }
+  return null;
+}
 
 const PROFILE_IMAGES = {
   male: require('./assets/profile-male.png'),
@@ -304,26 +371,37 @@ function ProfileAvatar({
   );
 }
 
-function isPostVisibleIn(post: SeedPost, lang: Language): boolean {
-  if (post.originalLanguage === lang) return true;
-  return SEED_TRANSLATIONS.some(
-    (t) =>
-      t.targetType === 'post' &&
-      t.targetId === post.postId &&
-      t.targetLanguage === lang &&
-      t.status === 'completed',
+function findConversation(
+  postId: string,
+  rootCommentId: string,
+): SeedConversation | undefined {
+  return SEED_CONVERSATIONS.find(
+    (c) => c.postId === postId && c.rootCommentId === rootCommentId,
   );
 }
 
+type MessageValidation = { ok: boolean; reason?: string };
+
+function validateMessageBeforeSend(text: string): MessageValidation {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { ok: false, reason: '빈 메시지는 보낼 수 없어요.' };
+  }
+  // TODO: 개인정보/유해 표현 차단 필터 연결 지점
+  //   - 전화번호 (예: /\d{3}-?\d{3,4}-?\d{4}/)
+  //   - 카카오톡 / 인스타그램 / 텔레그램 ID
+  //   - 이메일, 정확한 주소, 학교명, 직장명
+  //   - 직접적인 나이 공개, 외부 메신저 유도
+  //   - 욕설/혐오/위협/성희롱/스토킹성 표현
+  return { ok: true };
+}
+
+function isPostVisibleIn(post: SeedPost, lang: Language): boolean {
+  return post.originalLanguage === lang;
+}
+
 function isReplyVisibleIn(reply: SeedReply, lang: Language): boolean {
-  if (reply.originalLanguage === lang) return true;
-  return SEED_TRANSLATIONS.some(
-    (t) =>
-      t.targetType === 'reply' &&
-      t.targetId === reply.replyId &&
-      t.targetLanguage === lang &&
-      t.status === 'completed',
-  );
+  return reply.originalLanguage === lang;
 }
 
 function relTime(iso: string): string {
@@ -342,6 +420,8 @@ export default function App() {
   const [previousRoute, setPreviousRoute] = useState<Route>('main');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [deletedConversationIds, setDeletedConversationIds] = useState<string[]>([]);
   const [viewerLanguage, setViewerLanguage] = useState<Language>('ko');
 
   const scale = SCALES[textSizeStep];
@@ -366,19 +446,34 @@ export default function App() {
     setRoute('profile');
   };
 
+  const openConversation = (postId: string, rootCommentId: string) => {
+    const existing = findConversation(postId, rootCommentId);
+    if (existing) {
+      if (deletedConversationIds.includes(existing.conversationId)) {
+        Alert.alert('대화방', '이 대화는 이미 정리되었어요.');
+        return;
+      }
+      setSelectedConversationId(existing.conversationId);
+      setRoute('conversation');
+    } else {
+      // TODO: 대화방이 없으면 새로 생성한다 (postId + rootCommentId 기준 중복 방지)
+      Alert.alert('대화방', '대화방 생성은 곧 추가됩니다.');
+    }
+  };
+
+  const handleLeaveConversation = (convId: string) => {
+    setDeletedConversationIds((prev) => [...prev, convId]);
+    setSelectedConversationId(null);
+    setRoute('post');
+  };
+
   const goBack = () => {
     if (route === 'profile') setRoute(previousRoute);
+    else if (route === 'conversation') setRoute('post');
     else if (route === 'post') setRoute('category');
     else setRoute('main');
   };
 
-  const changeViewerLanguage = (lang: Language) => {
-    setViewerLanguage(lang);
-    if (previousRoute === 'post') {
-      setPreviousRoute(selectedCategoryId ? 'category' : 'main');
-      setSelectedPostId(null);
-    }
-  };
 
   return (
     <View style={{ flex: 1, backgroundColor: PALETTE.bg }}>
@@ -414,6 +509,18 @@ export default function App() {
           viewerLanguage={viewerLanguage}
           onBack={goBack}
           onOpenProfile={openProfile}
+          onOpenConversation={openConversation}
+        />
+      )}
+      {route === 'conversation' && selectedConversationId && (
+        <ConversationScreen
+          scale={scale}
+          textSizeStep={textSizeStep}
+          onChangeTextSize={changeTextSize}
+          conversationId={selectedConversationId}
+          onBack={goBack}
+          onOpenProfile={openProfile}
+          onLeave={handleLeaveConversation}
         />
       )}
       {route === 'profile' && (
@@ -421,8 +528,6 @@ export default function App() {
           scale={scale}
           textSizeStep={textSizeStep}
           onChangeTextSize={changeTextSize}
-          viewerLanguage={viewerLanguage}
-          onChangeViewerLanguage={changeViewerLanguage}
           onClose={goBack}
         />
       )}
@@ -574,6 +679,12 @@ function CategoryScreen({
                     />
                     <Text style={styles.authorName}>{author?.nickname ?? '익명'}</Text>
                     <Text style={styles.authorTime}>{relTime(post.createdAt)}</Text>
+                    <View style={styles.headerRight}>
+                      <Text style={styles.replyCount}>
+                        답글 {post.replies.length}
+                      </Text>
+                      <Text style={styles.chevron}>›</Text>
+                    </View>
                   </View>
 
                   <Text
@@ -583,13 +694,6 @@ function CategoryScreen({
                   >
                     {resolved.text}
                   </Text>
-
-                  <View style={styles.postFooter}>
-                    <Text style={styles.replyCount}>
-                      답글 {post.replies.length}
-                    </Text>
-                    <Text style={styles.chevron}>›</Text>
-                  </View>
                 </Pressable>
               );
             })}
@@ -613,6 +717,7 @@ function PostDetailScreen({
   viewerLanguage,
   onBack,
   onOpenProfile,
+  onOpenConversation,
 }: {
   scale: number;
   textSizeStep: TextSizeStep;
@@ -621,6 +726,7 @@ function PostDetailScreen({
   viewerLanguage: Language;
   onBack: () => void;
   onOpenProfile: () => void;
+  onOpenConversation: (postId: string, rootCommentId: string) => void;
 }) {
   const styles = useMemo(() => createPostDetailStyles(scale), [scale]);
   const post = useMemo(() => {
@@ -636,6 +742,35 @@ function PostDetailScreen({
       ),
     [post, viewerLanguage],
   );
+
+  const [localInvites, setLocalInvites] = useState<
+    Record<string, ConversationInvite>
+  >({});
+
+  const handleSendInvite = (replyId: string) => {
+    const newInvite: ConversationInvite = {
+      inviteId: `local_inv_${Date.now()}`,
+      userId: CURRENT_USER_ID ?? 'm_01',
+      originalLanguage: 'ko',
+      originalContent:
+        '괜찮다면 이 문장을 계기로 조금 더 천천히 이야기 나눠보고 싶어요.',
+      createdAt: new Date().toISOString(),
+      isSample: true,
+    };
+    setLocalInvites((prev) => ({ ...prev, [replyId]: newInvite }));
+  };
+
+  const displayedReplies = useMemo(
+    () =>
+      visibleReplies.map((reply) => {
+        if (!reply.conversationInvite && localInvites[reply.replyId]) {
+          return { ...reply, conversationInvite: localInvites[reply.replyId] };
+        }
+        return reply;
+      }),
+    [visibleReplies, localInvites],
+  );
+
   const author = post ? USER_MAP[post.userId] : undefined;
 
   return (
@@ -674,14 +809,18 @@ function PostDetailScreen({
 
             <View style={styles.repliesSection}>
               <Text style={styles.repliesHeader}>
-                답글 {visibleReplies.length}
+                답글 {displayedReplies.length}
               </Text>
-              {visibleReplies.map((reply) => (
+              {displayedReplies.map((reply) => (
                 <ReplyRow
                   key={reply.replyId}
                   reply={reply}
                   styles={styles}
                   viewerLanguage={viewerLanguage}
+                  postId={post.postId}
+                  postAuthorId={post.userId}
+                  onOpenConversation={onOpenConversation}
+                  onSendInvite={handleSendInvite}
                 />
               ))}
             </View>
@@ -703,10 +842,18 @@ function ReplyRow({
   reply,
   styles,
   viewerLanguage,
+  postId,
+  postAuthorId,
+  onOpenConversation,
+  onSendInvite,
 }: {
   reply: SeedReply;
   styles: ReturnType<typeof createPostDetailStyles>;
   viewerLanguage: Language;
+  postId: string;
+  postAuthorId: string;
+  onOpenConversation: (postId: string, rootCommentId: string) => void;
+  onSendInvite: (replyId: string) => void;
 }) {
   const author = USER_MAP[reply.userId];
   const resolved = resolveContent({
@@ -717,6 +864,12 @@ function ReplyRow({
     viewerLanguage,
     translations: SEED_TRANSLATIONS,
   });
+
+  const canInvite =
+    CURRENT_USER_ID === postAuthorId &&
+    CURRENT_USER_ID !== reply.userId &&
+    !reply.conversationInvite;
+
   return (
     <View style={styles.reply}>
       <ProfileAvatar
@@ -730,7 +883,130 @@ function ReplyRow({
           <Text style={styles.replyTime}>{relTime(reply.createdAt)}</Text>
         </View>
         <Text style={styles.replyText}>{resolved.text}</Text>
+
+        {reply.conversationInvite ? (
+          <InviteBlock
+            invite={reply.conversationInvite}
+            styles={styles}
+            postId={postId}
+            postAuthorId={postAuthorId}
+            replyAuthorId={reply.userId}
+            rootCommentId={reply.replyId}
+            onOpenConversation={onOpenConversation}
+          />
+        ) : null}
+
+        {canInvite ? (
+          <Pressable
+            onPress={() => onSendInvite(reply.replyId)}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.inviteCta,
+              pressed && styles.ctaPressed,
+            ]}
+          >
+            <Text style={styles.inviteCtaText}>대화초대</Text>
+          </Pressable>
+        ) : null}
       </View>
+    </View>
+  );
+}
+
+function InviteBlock({
+  invite,
+  styles,
+  postId,
+  postAuthorId,
+  replyAuthorId,
+  rootCommentId,
+  onOpenConversation,
+}: {
+  invite: ConversationInvite;
+  styles: ReturnType<typeof createPostDetailStyles>;
+  postId: string;
+  postAuthorId: string;
+  replyAuthorId: string;
+  rootCommentId: string;
+  onOpenConversation: (postId: string, rootCommentId: string) => void;
+}) {
+  const author = USER_MAP[invite.userId];
+  const canJoin =
+    CURRENT_USER_ID === replyAuthorId && !invite.conversationJoin;
+  const canContinue =
+    !!invite.conversationJoin &&
+    (CURRENT_USER_ID === postAuthorId || CURRENT_USER_ID === replyAuthorId);
+
+  return (
+    <View style={styles.invite}>
+      <Text style={styles.inviteLabel}>대화초대</Text>
+      <View style={styles.inviteHeader}>
+        <ProfileAvatar
+          user={author}
+          size={22}
+          style={styles.inviteAvatar}
+        />
+        <Text style={styles.inviteAuthor}>{author?.nickname ?? '익명'}</Text>
+        <Text style={styles.inviteTime}>{relTime(invite.createdAt)}</Text>
+      </View>
+      <Text style={styles.inviteText}>{invite.originalContent}</Text>
+
+      {invite.conversationJoin ? (
+        <JoinBlock join={invite.conversationJoin} styles={styles} />
+      ) : null}
+
+      {canJoin ? (
+        <Pressable
+          onPress={() =>
+            Alert.alert('대화참여', '대화참여 기능은 곧 추가됩니다.')
+          }
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.joinCta,
+            pressed && styles.ctaPressed,
+          ]}
+        >
+          <Text style={styles.joinCtaText}>대화참여</Text>
+        </Pressable>
+      ) : null}
+
+      {canContinue ? (
+        <Pressable
+          onPress={() => onOpenConversation(postId, rootCommentId)}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.continueCta,
+            pressed && styles.ctaPressed,
+          ]}
+        >
+          <Text style={styles.continueCtaText}>대화 이어가기</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function JoinBlock({
+  join,
+  styles,
+}: {
+  join: ConversationJoin;
+  styles: ReturnType<typeof createPostDetailStyles>;
+}) {
+  const author = USER_MAP[join.userId];
+  return (
+    <View style={styles.join}>
+      <Text style={styles.joinLabel}>대화참여</Text>
+      <View style={styles.joinHeader}>
+        <ProfileAvatar
+          user={author}
+          size={22}
+          style={styles.joinAvatar}
+        />
+        <Text style={styles.joinAuthor}>{author?.nickname ?? '익명'}</Text>
+        <Text style={styles.joinTime}>{relTime(join.createdAt)}</Text>
+      </View>
+      <Text style={styles.joinText}>{join.originalContent}</Text>
     </View>
   );
 }
@@ -739,15 +1015,11 @@ function ProfileScreen({
   scale,
   textSizeStep,
   onChangeTextSize,
-  viewerLanguage,
-  onChangeViewerLanguage,
   onClose,
 }: {
   scale: number;
   textSizeStep: TextSizeStep;
   onChangeTextSize: (delta: number) => void;
-  viewerLanguage: Language;
-  onChangeViewerLanguage: (lang: Language) => void;
   onClose: () => void;
 }) {
   const styles = useMemo(() => createProfileStyles(scale), [scale]);
@@ -761,35 +1033,6 @@ function ProfileScreen({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
-        <Text style={styles.sectionLabel}>표시 언어</Text>
-        <View style={styles.langRow}>
-          {LANGUAGE_ORDER.map((lang) => {
-            const selected = viewerLanguage === lang;
-            return (
-              <Pressable
-                key={lang}
-                onPress={() => onChangeViewerLanguage(lang)}
-                style={({ pressed }) => [
-                  styles.langButton,
-                  selected && styles.langButtonSelected,
-                  pressed && styles.langButtonPressed,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.langButtonText,
-                    selected && styles.langButtonTextSelected,
-                  ]}
-                >
-                  {LANGUAGE_LABELS[lang]}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <View style={styles.sectionDivider} />
-
         <Text style={styles.sectionLabel}>프로필 정보</Text>
         <Text style={styles.sectionPlaceholder}>
           곧 닉네임·연령대·소개 같은 항목이 이 자리에 채워질 예정입니다.
@@ -808,6 +1051,435 @@ function ProfileScreen({
         <NavButton position="right" onPress={onClose} icon="←" />
       </View>
     </SafeAreaView>
+  );
+}
+
+function ConversationScreen({
+  scale,
+  textSizeStep,
+  onChangeTextSize,
+  conversationId,
+  onBack,
+  onOpenProfile,
+  onLeave,
+}: {
+  scale: number;
+  textSizeStep: TextSizeStep;
+  onChangeTextSize: (delta: number) => void;
+  conversationId: string;
+  onBack: () => void;
+  onOpenProfile: () => void;
+  onLeave: (conversationId: string) => void;
+}) {
+  const styles = useMemo(() => createConversationStyles(scale), [scale]);
+  const [draft, setDraft] = useState('');
+  const [extraMessages, setExtraMessages] = useState<SeedMessage[]>([]);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [deletedIds, setDeletedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const conversation = useMemo(
+    () => SEED_CONVERSATIONS.find((c) => c.conversationId === conversationId),
+    [conversationId],
+  );
+
+  const counterpart = useMemo(() => {
+    if (!conversation) return undefined;
+    const otherId = conversation.participants.find(
+      (p) => p !== CURRENT_USER_ID,
+    );
+    return otherId ? USER_MAP[otherId] : undefined;
+  }, [conversation]);
+
+  const scrollRef = useRef<ScrollView>(null);
+
+  const messages = useMemo(() => {
+    const seed = SEED_MESSAGES.filter(
+      (m) => m.conversationId === conversationId,
+    ).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...seed, ...extraMessages].filter(
+      (m) => !deletedIds.includes(m.messageId),
+    );
+  }, [conversationId, extraMessages, deletedIds]);
+
+  const handleDelete = (messageId: string) => {
+    Alert.alert('메시지 삭제', '이 메시지를 삭제할까요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: () => {
+          setDeletedIds((prev) => [...prev, messageId]);
+        },
+      },
+    ]);
+  };
+
+  const handleSend = () => {
+    const validation = validateMessageBeforeSend(draft);
+    if (!validation.ok) {
+      Alert.alert('메시지 확인', validation.reason ?? '');
+      return;
+    }
+    const newMsg: SeedMessage = {
+      messageId: `local_${Date.now()}`,
+      conversationId,
+      senderId: CURRENT_USER_ID ?? 'm_01',
+      originalLanguage: 'ko',
+      originalContent: draft.trim(),
+      createdAt: new Date().toISOString(),
+      isSample: true,
+    };
+    setExtraMessages([...extraMessages, newMsg]);
+    setDraft('');
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+  };
+
+  const requestDisclosure = (kind: DisclosureKind) => {
+    const newMsg: SeedMessage = {
+      messageId: `local_${Date.now()}`,
+      conversationId,
+      senderId: CURRENT_USER_ID ?? 'm_01',
+      originalLanguage: 'ko',
+      originalContent: DISCLOSURE_REQUEST_LINE[kind],
+      createdAt: new Date().toISOString(),
+      isSample: true,
+      kind: 'disclosure_request',
+      disclosureKind: kind,
+    };
+    setExtraMessages([...extraMessages, newMsg]);
+    requestAnimationFrame(() =>
+      scrollRef.current?.scrollToEnd({ animated: true }),
+    );
+  };
+
+  const handleAcceptDisclosure = (request: SeedMessage) => {
+    if (!request.disclosureKind) return;
+    const now = Date.now();
+    const acceptMsg: SeedMessage = {
+      messageId: `local_${now}`,
+      conversationId,
+      senderId: CURRENT_USER_ID ?? 'm_01',
+      originalLanguage: 'ko',
+      originalContent: DISCLOSURE_ACCEPT_LINE,
+      createdAt: new Date(now).toISOString(),
+      isSample: true,
+      kind: 'disclosure_accepted',
+      disclosureKind: request.disclosureKind,
+    };
+    const infoMsg: SeedMessage = {
+      messageId: `local_${now + 1}`,
+      conversationId,
+      senderId: 'system',
+      originalLanguage: 'ko',
+      originalContent: DISCLOSURE_INFO_LINE[request.disclosureKind],
+      createdAt: new Date(now + 1).toISOString(),
+      isSample: true,
+      kind: 'disclosure_info',
+      disclosureKind: request.disclosureKind,
+    };
+    setExtraMessages([...extraMessages, acceptMsg, infoMsg]);
+    requestAnimationFrame(() =>
+      scrollRef.current?.scrollToEnd({ animated: true }),
+    );
+  };
+
+  const handleDeclineDisclosure = (request: SeedMessage) => {
+    if (!request.disclosureKind) return;
+    const declineMsg: SeedMessage = {
+      messageId: `local_${Date.now()}`,
+      conversationId,
+      senderId: CURRENT_USER_ID ?? 'm_01',
+      originalLanguage: 'ko',
+      originalContent: DISCLOSURE_DECLINE_LINE,
+      createdAt: new Date().toISOString(),
+      isSample: true,
+      kind: 'disclosure_declined',
+      disclosureKind: request.disclosureKind,
+    };
+    setExtraMessages([...extraMessages, declineMsg]);
+    requestAnimationFrame(() =>
+      scrollRef.current?.scrollToEnd({ animated: true }),
+    );
+  };
+
+  const handleLeave = () => {
+    Alert.alert(
+      '대화방 나가기',
+      '이 대화방을 나가면 이 대화 기록은 더 이상 보이지 않아요.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '나가기',
+          style: 'destructive',
+          onPress: () => onLeave(conversationId),
+        },
+      ],
+    );
+  };
+
+  const handleMore = () => {
+    Alert.alert('', '', [
+      { text: '대화방 나가기', onPress: handleLeave },
+      { text: '신고하기', onPress: () => {} },
+      { text: '이 사용자 차단하기', onPress: () => {} },
+      { text: '닫기', style: 'cancel' },
+    ]);
+  };
+
+  if (!conversation) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <BrandHeader onProfile={onOpenProfile} />
+        <View style={styles.notFoundBox}>
+          <Text style={styles.notFoundText}>대화를 찾을 수 없어요.</Text>
+        </View>
+        <View style={bottomBarStyles.bar}>
+          <SizeButtons
+            textSizeStep={textSizeStep}
+            onChangeTextSize={onChangeTextSize}
+          />
+          <NavButton position="right" onPress={onBack} icon="←" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <BrandHeader onProfile={onOpenProfile} />
+
+      <View style={styles.titleArea}>
+        <View style={styles.titleRow}>
+          <View style={styles.titleLeft}>
+            <Text style={styles.title}>
+              {counterpart?.nickname ?? '익명'}님과의 대화
+            </Text>
+          </View>
+          <Pressable
+            onPress={handleMore}
+            hitSlop={10}
+            style={({ pressed }) => pressed && styles.morePressed}
+          >
+            <Text style={styles.moreText}>⋯</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <KeyboardAvoidingView
+        style={styles.kav}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <ScrollView
+          ref={scrollRef}
+          style={styles.scrollFlex}
+          contentContainerStyle={styles.messageList}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() =>
+            scrollRef.current?.scrollToEnd({ animated: false })
+          }
+        >
+          {messages.map((m, idx) => {
+            const isLast = idx === messages.length - 1;
+            const isRegular = m.kind === undefined || m.kind === 'text';
+            const canDelete =
+              isLast && isRegular && m.senderId === CURRENT_USER_ID;
+            let onAccept: (() => void) | undefined;
+            let onDecline: (() => void) | undefined;
+            if (
+              m.kind === 'disclosure_request' &&
+              m.senderId !== CURRENT_USER_ID
+            ) {
+              const subsequent = messages.slice(idx + 1);
+              const resolved = subsequent.some(
+                (s) =>
+                  (s.kind === 'disclosure_accepted' ||
+                    s.kind === 'disclosure_declined') &&
+                  s.disclosureKind === m.disclosureKind,
+              );
+              if (!resolved) {
+                onAccept = () => handleAcceptDisclosure(m);
+                onDecline = () => handleDeclineDisclosure(m);
+              }
+            }
+            return (
+              <MessageBubble
+                key={m.messageId}
+                message={m}
+                myId={CURRENT_USER_ID}
+                styles={styles}
+                onDelete={canDelete ? () => handleDelete(m.messageId) : undefined}
+                onAcceptDisclosure={onAccept}
+                onDeclineDisclosure={onDecline}
+              />
+            );
+          })}
+        </ScrollView>
+
+        <View style={styles.inputRow}>
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="천천히 한 마디 적어보세요"
+            placeholderTextColor={PALETTE.textMuted}
+            style={styles.input}
+            multiline
+            maxLength={500}
+          />
+          <Pressable
+            onPress={handleSend}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.sendButton,
+              pressed && styles.ctaPressed,
+            ]}
+          >
+            <Text style={styles.sendText}>보내기</Text>
+          </Pressable>
+        </View>
+
+        {!keyboardVisible ? (
+          <View style={bottomBarStyles.bar}>
+            <SizeButtons
+              textSizeStep={textSizeStep}
+              onChangeTextSize={onChangeTextSize}
+            />
+            <NavButton position="right" onPress={onBack} icon="←" />
+          </View>
+        ) : null}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function MessageBubble({
+  message,
+  myId,
+  styles,
+  onDelete,
+  onAcceptDisclosure,
+  onDeclineDisclosure,
+}: {
+  message: SeedMessage;
+  myId: string | null;
+  styles: ReturnType<typeof createConversationStyles>;
+  onDelete?: () => void;
+  onAcceptDisclosure?: () => void;
+  onDeclineDisclosure?: () => void;
+}) {
+  const kind = message.kind;
+
+  if (kind === 'disclosure_info') {
+    return (
+      <View style={styles.disclosureInfoRow}>
+        <Text style={styles.disclosureInfoText}>
+          · {message.originalContent} ·
+        </Text>
+      </View>
+    );
+  }
+
+  const showDisclosureActions =
+    kind === 'disclosure_request' &&
+    !!onAcceptDisclosure &&
+    !!onDeclineDisclosure;
+
+  const isMine = message.senderId === myId;
+  const author = USER_MAP[message.senderId];
+  const nickname = author?.nickname ?? '익명';
+  const bubbleBg =
+    author?.gender === 'female' ? PALETTE.bubbleFemale : PALETTE.bubbleMale;
+  return (
+    <View
+      style={[
+        styles.messageRow,
+        isMine ? styles.messageRowMine : styles.messageRowTheirs,
+      ]}
+    >
+      <View style={styles.messageMeta}>
+        {isMine ? (
+          <>
+            <Text style={styles.metaName}>{nickname}</Text>
+            <ProfileAvatar
+              user={author}
+              size={20}
+              style={styles.metaAvatarMine}
+            />
+          </>
+        ) : (
+          <>
+            <ProfileAvatar
+              user={author}
+              size={20}
+              style={styles.metaAvatarTheirs}
+            />
+            <Text style={styles.metaName}>{nickname}</Text>
+          </>
+        )}
+      </View>
+      <View
+        style={[
+          styles.bubble,
+          { backgroundColor: bubbleBg },
+          isMine ? styles.bubbleMine : styles.bubbleTheirs,
+        ]}
+      >
+        <Text style={styles.bubbleText}>{message.originalContent}</Text>
+        {showDisclosureActions ? (
+          <View style={styles.bubbleDisclosureActions}>
+            <Pressable
+              onPress={onAcceptDisclosure}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.bubbleActionAccept,
+                pressed && styles.bubbleActionPressed,
+              ]}
+            >
+              <Text style={styles.bubbleActionAcceptText}>수락</Text>
+            </Pressable>
+            <Pressable
+              onPress={onDeclineDisclosure}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.bubbleActionDecline,
+                pressed && styles.bubbleActionPressed,
+              ]}
+            >
+              <Text style={styles.bubbleActionDeclineText}>거절</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        <View style={styles.bubbleFooter}>
+          <Text style={styles.bubbleTime}>{relTime(message.createdAt)}</Text>
+          {onDelete ? (
+            <Pressable
+              onPress={onDelete}
+              hitSlop={10}
+              style={({ pressed }) => [
+                styles.deleteButton,
+                pressed && styles.deletePressed,
+              ]}
+            >
+              <Text style={styles.deleteX}>×</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -881,9 +1553,20 @@ const navButtonStyles = StyleSheet.create({
   },
 });
 
-function BrandHeader({ onProfile }: { onProfile?: () => void }) {
+function BrandHeader({
+  onProfile,
+  bg,
+}: {
+  onProfile?: () => void;
+  bg?: string;
+}) {
   return (
-    <View style={brandHeaderStyles.container}>
+    <View
+      style={[
+        brandHeaderStyles.container,
+        bg ? { backgroundColor: bg } : null,
+      ]}
+    >
       <Text style={brandHeaderStyles.logo}>DULSAI</Text>
       {onProfile ? (
         <Pressable
@@ -1141,9 +1824,9 @@ function createCategoryStyles(scale: number) {
     postCard: {
       backgroundColor: PALETTE.card,
       borderRadius: 10,
-      paddingVertical: 16,
+      paddingVertical: 13,
       paddingHorizontal: 16,
-      marginBottom: 10,
+      marginBottom: 8,
     },
     postCardPressed: {
       backgroundColor: PALETTE.cardPressed,
@@ -1151,7 +1834,7 @@ function createCategoryStyles(scale: number) {
     postHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 12,
+      marginBottom: 8,
     },
     profileIconSmall: {
       marginRight: 10,
@@ -1167,6 +1850,11 @@ function createCategoryStyles(scale: number) {
       fontSize: 11 * scale,
       marginLeft: 8,
     },
+    headerRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginLeft: 'auto',
+    },
     postPreview: {
       color: '#FFFFFF',
       fontSize: 14 * scale,
@@ -1174,20 +1862,15 @@ function createCategoryStyles(scale: number) {
       fontWeight: '300',
       letterSpacing: 0.2,
     },
-    postFooter: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginTop: 14,
-    },
     replyCount: {
       color: PALETTE.textMuted,
-      fontSize: 12 * scale,
+      fontSize: 11 * scale,
       letterSpacing: 0.3,
+      marginRight: 4,
     },
     chevron: {
       color: PALETTE.chevron,
-      fontSize: 18,
+      fontSize: 15,
       fontWeight: '300',
     },
     emptyText: {
@@ -1295,6 +1978,136 @@ function createPostDetailStyles(scale: number) {
       fontWeight: '300',
       letterSpacing: 0.2,
     },
+    invite: {
+      marginTop: 14,
+      paddingTop: 10,
+      paddingBottom: 10,
+      paddingHorizontal: 12,
+      backgroundColor: PALETTE.invitePanel,
+      borderRadius: 6,
+    },
+    inviteLabel: {
+      color: PALETTE.inviteAccent,
+      fontSize: 10 * scale,
+      fontWeight: '400',
+      letterSpacing: 1,
+      marginBottom: 6,
+      opacity: 0.85,
+    },
+    inviteHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    inviteAvatar: {
+      marginRight: 8,
+    },
+    inviteAuthor: {
+      color: '#FFFFFF',
+      fontSize: 12 * scale,
+      fontWeight: '500',
+      letterSpacing: 0.3,
+    },
+    inviteTime: {
+      color: PALETTE.textMuted,
+      fontSize: 10 * scale,
+      marginLeft: 8,
+    },
+    inviteText: {
+      color: '#FFFFFF',
+      fontSize: 14 * scale,
+      lineHeight: 22 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+    },
+    join: {
+      marginTop: 12,
+      paddingTop: 8,
+      paddingBottom: 4,
+    },
+    joinLabel: {
+      color: PALETTE.textMuted,
+      fontSize: 10 * scale,
+      fontWeight: '400',
+      letterSpacing: 1,
+      marginBottom: 5,
+      opacity: 0.8,
+    },
+    joinHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    joinAvatar: {
+      marginRight: 8,
+    },
+    joinAuthor: {
+      color: '#FFFFFF',
+      fontSize: 12 * scale,
+      fontWeight: '500',
+      letterSpacing: 0.3,
+    },
+    joinTime: {
+      color: PALETTE.textMuted,
+      fontSize: 10 * scale,
+      marginLeft: 8,
+    },
+    joinText: {
+      color: '#FFFFFF',
+      fontSize: 14 * scale,
+      lineHeight: 22 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+    },
+    inviteCta: {
+      alignSelf: 'flex-start',
+      marginTop: 8,
+      paddingVertical: 3,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.inviteAccent,
+    },
+    inviteCtaText: {
+      color: PALETTE.inviteAccent,
+      fontSize: 10 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    joinCta: {
+      alignSelf: 'flex-start',
+      marginTop: 6,
+      paddingVertical: 3,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.border,
+    },
+    joinCtaText: {
+      color: PALETTE.textMuted,
+      fontSize: 10 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    continueCta: {
+      alignSelf: 'flex-start',
+      marginTop: 10,
+      paddingVertical: 4,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.inviteAccent,
+      backgroundColor: PALETTE.invitePanel,
+    },
+    continueCtaText: {
+      color: PALETTE.inviteAccent,
+      fontSize: 11 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    ctaPressed: {
+      opacity: 0.5,
+    },
     notFound: {
       color: PALETTE.textMuted,
       fontSize: 14 * scale,
@@ -1326,35 +2139,6 @@ function createProfileStyles(scale: number) {
       fontWeight: '300',
       textTransform: 'uppercase',
     },
-    langRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-    langButton: {
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 8,
-      backgroundColor: PALETTE.card,
-      borderWidth: 1,
-      borderColor: 'transparent',
-    },
-    langButtonSelected: {
-      borderColor: PALETTE.brandRed,
-      backgroundColor: PALETTE.cardPressed,
-    },
-    langButtonPressed: {
-      opacity: 0.7,
-    },
-    langButtonText: {
-      color: PALETTE.textMuted,
-      fontSize: 13 * scale,
-      fontWeight: '400',
-      letterSpacing: 0.3,
-    },
-    langButtonTextSelected: {
-      color: PALETTE.textCategory,
-    },
     sectionDivider: {
       height: 1,
       backgroundColor: PALETTE.border,
@@ -1367,6 +2151,241 @@ function createProfileStyles(scale: number) {
       lineHeight: 24 * scale,
       fontWeight: '300',
       letterSpacing: 0.3,
+    },
+  });
+}
+
+function createConversationStyles(scale: number) {
+  return StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: PALETTE.bg,
+    },
+    kav: {
+      flex: 1,
+    },
+    scrollFlex: {
+      flex: 1,
+    },
+    titleArea: {
+      paddingTop: 4,
+      paddingBottom: 14,
+      paddingHorizontal: 24,
+      backgroundColor: PALETTE.bg,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    titleLeft: {
+      flex: 1,
+    },
+    title: {
+      color: '#FFFFFF',
+      fontSize: 15 * scale,
+      fontWeight: '500',
+      letterSpacing: 0.3,
+    },
+    moreText: {
+      color: PALETTE.textMuted,
+      fontSize: 20,
+      paddingHorizontal: 4,
+      marginTop: -4,
+    },
+    morePressed: {
+      opacity: 0.5,
+    },
+    messageList: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 12,
+    },
+    messageRow: {
+      width: '100%',
+      marginBottom: 14,
+    },
+    messageRowMine: {
+      alignItems: 'flex-end',
+    },
+    messageRowTheirs: {
+      alignItems: 'flex-start',
+    },
+    messageMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    metaAvatarTheirs: {
+      marginRight: 6,
+    },
+    metaAvatarMine: {
+      marginLeft: 6,
+    },
+    metaName: {
+      color: PALETTE.textMuted,
+      fontSize: 11 * scale,
+      letterSpacing: 0.3,
+      fontWeight: '400',
+    },
+    bubble: {
+      maxWidth: '80%',
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+    },
+    bubbleMine: {
+      borderTopRightRadius: 4,
+    },
+    bubbleTheirs: {
+      borderTopLeftRadius: 4,
+    },
+    bubbleText: {
+      color: '#FFFFFF',
+      fontSize: 14 * scale,
+      lineHeight: 22 * scale,
+      fontWeight: '300',
+      letterSpacing: 0.2,
+    },
+    bubbleFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 4,
+    },
+    bubbleTime: {
+      color: 'rgba(255, 255, 255, 0.65)',
+      fontSize: 10 * scale,
+      letterSpacing: 0.3,
+    },
+    deleteButton: {
+      marginLeft: 10,
+      paddingHorizontal: 4,
+    },
+    deletePressed: {
+      opacity: 0.4,
+    },
+    deleteX: {
+      color: 'rgba(255, 255, 255, 0.45)',
+      fontSize: 14,
+      fontWeight: '300',
+      lineHeight: 14,
+    },
+    disclosureInfoRow: {
+      width: '100%',
+      alignItems: 'center',
+      marginVertical: 6,
+    },
+    disclosureInfoText: {
+      color: PALETTE.textMuted,
+      fontSize: 10 * scale,
+      letterSpacing: 0.5,
+      opacity: 0.7,
+    },
+    bubbleDisclosureActions: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 10,
+      alignSelf: 'flex-start',
+    },
+    bubbleActionAccept: {
+      paddingVertical: 4,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.inviteAccent,
+      backgroundColor: 'rgba(125, 170, 151, 0.10)',
+    },
+    bubbleActionDecline: {
+      paddingVertical: 4,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(255, 255, 255, 0.25)',
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    bubbleActionAcceptText: {
+      color: PALETTE.inviteAccent,
+      fontSize: 11 * scale,
+      fontWeight: '500',
+      letterSpacing: 0.3,
+    },
+    bubbleActionDeclineText: {
+      color: 'rgba(255, 255, 255, 0.8)',
+      fontSize: 11 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    bubbleActionPressed: {
+      opacity: 0.55,
+    },
+    leaveRow: {
+      paddingTop: 8,
+      paddingBottom: 4,
+      alignItems: 'center',
+      backgroundColor: PALETTE.bg,
+    },
+    leaveButton: {
+      paddingVertical: 6,
+      paddingHorizontal: 16,
+      borderRadius: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: PALETTE.border,
+      backgroundColor: PALETTE.card,
+    },
+    leaveText: {
+      color: PALETTE.textMuted,
+      fontSize: 12 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    leavePressed: {
+      opacity: 0.6,
+    },
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      gap: 8,
+      backgroundColor: PALETTE.bg,
+    },
+    input: {
+      flex: 1,
+      color: '#FFFFFF',
+      fontSize: 14 * scale,
+      lineHeight: 22 * scale,
+      fontWeight: '300',
+      backgroundColor: PALETTE.cardPressed,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      borderRadius: 14,
+      maxHeight: 120,
+    },
+    sendButton: {
+      alignSelf: 'flex-end',
+      paddingVertical: 11,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      backgroundColor: PALETTE.cardPressed,
+    },
+    sendText: {
+      color: PALETTE.inviteAccent,
+      fontSize: 13 * scale,
+      fontWeight: '400',
+      letterSpacing: 0.3,
+    },
+    ctaPressed: {
+      opacity: 0.5,
+    },
+    notFoundBox: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 32,
+    },
+    notFoundText: {
+      color: PALETTE.textMuted,
+      fontSize: 14 * scale,
     },
   });
 }
