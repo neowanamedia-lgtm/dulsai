@@ -29,6 +29,9 @@ export const supabase: SupabaseClient<Database> = createClient<Database>(
       storage: AsyncStorage,
       autoRefreshToken: true,
       persistSession: true,
+      // 모바일 OAuth (Kakao 등) 에서 안전한 PKCE flow 사용.
+      // signInWithOAuth → exchangeCodeForSession 흐름을 위해 필수.
+      flowType: 'pkce',
       detectSessionInUrl: false,
     },
   },

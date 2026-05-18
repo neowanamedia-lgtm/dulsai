@@ -80,6 +80,10 @@ export type DbPost = {
   max_comments: number | null;
   status: string | null;
   visibility: string | null;
+  // 작성자 성별을 row 자체에 박아 두는 비정규화 컬럼.
+  // create-post Edge Function 이 user_profiles.gender 를 읽어 자동으로 채운다.
+  // 이성 간 답글 정책의 빠른 검증을 위해 별도 컬럼으로 저장한다 (조인 회피).
+  author_gender: Gender | null;
   created_at: Iso;
   updated_at: Iso | null;
 };
@@ -127,6 +131,42 @@ export type DbConversationInviteInsert = Partial<DbConversationInvite> & {
   content: string;
 };
 export type DbConversationInviteUpdate = Partial<DbConversationInvite>;
+
+// ──────────────────────────────────────────────────────────────────────────
+// content_reports — 신고 데이터
+// 운영자는 Supabase SQL editor 로 status='open' 항목을 검토한다.
+// ──────────────────────────────────────────────────────────────────────────
+export type DbContentReport = {
+  id: string;
+  reporter_id: string;
+  target_type: string; // 'user' | 'post' | 'reply' | 'message' | 'conversation'
+  target_id: string;
+  reason_kind: string; // 'hate' | 'sexual' | 'spam' | 'private_info' | 'self_harm' | 'other'
+  reason_detail: string | null;
+  status: string; // 'open' | 'reviewed' | 'dismissed'
+  created_at: Iso;
+};
+
+export type DbContentReportInsert = Partial<DbContentReport> & {
+  reporter_id: string;
+  target_type: string;
+  target_id: string;
+  reason_kind: string;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// user_blocks — 사용자 차단 데이터 (양방향이 아닌, 단방향 차단)
+// ──────────────────────────────────────────────────────────────────────────
+export type DbUserBlock = {
+  blocker_id: string;
+  blocked_id: string;
+  created_at: Iso;
+};
+
+export type DbUserBlockInsert = Partial<DbUserBlock> & {
+  blocker_id: string;
+  blocked_id: string;
+};
 
 // ──────────────────────────────────────────────────────────────────────────
 // 미생성 테이블 (임시 타입, Database 스키마 비등록)
@@ -268,6 +308,18 @@ export type Database = {
         Row: DbConversation;
         Insert: DbConversationInsert;
         Update: DbConversationUpdate;
+        Relationships: [];
+      };
+      content_reports: {
+        Row: DbContentReport;
+        Insert: DbContentReportInsert;
+        Update: Partial<DbContentReport>;
+        Relationships: [];
+      };
+      user_blocks: {
+        Row: DbUserBlock;
+        Insert: DbUserBlockInsert;
+        Update: Partial<DbUserBlock>;
         Relationships: [];
       };
     };

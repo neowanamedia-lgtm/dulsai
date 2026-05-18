@@ -2,6 +2,7 @@
   "expo": {
     "name": "dulsai",
     "slug": "dulsai",
+    "scheme": "dulsai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/dulsai-logo.png",
@@ -13,9 +14,12 @@
       "backgroundColor": "#1c1a18"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dulsai.app",
+      "usesAppleSignIn": true
     },
     "android": {
+      "package": "com.dulsai.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1c1a18"
@@ -25,6 +29,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin"
+    ]
   }
 }

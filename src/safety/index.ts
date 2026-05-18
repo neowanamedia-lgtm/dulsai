@@ -14,14 +14,11 @@ export {
   detectKakao,
   detectInstagram,
   detectTelegram,
-  detectAddress,
-  detectSchool,
-  detectWorkplace,
-  detectResidence,
-  detectAgeDisclosure,
-  detectProfanity,
   detectThreat,
-  detectHarassment,
+  detectSexualHarassment,
   detectMeetPressure,
+  detectCsam,
+  detectSelfHarmIncite,
+  detectHateCrime,
 } from './detectors';
 export { getSafetyHint } from './messages';

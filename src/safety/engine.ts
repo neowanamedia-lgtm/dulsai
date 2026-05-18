@@ -6,6 +6,7 @@ import { detectAll } from './detectors';
 import { getSafetyHint } from './messages';
 import { logger } from '../lib/logger';
 import {
+  CRITICAL_CATEGORIES,
   EXCERPT_MAX_LEN,
   HARD_SEVERITY_PER_MESSAGE,
   VIOLATION_BLOCK_THRESHOLD,
@@ -33,8 +34,11 @@ export function checkSafety(
     };
   }
   const category = pickPrimaryCategory(violations);
+  const isCritical = CRITICAL_CATEGORIES.includes(category);
   const severity: SafetySeverity =
-    violations.length >= HARD_SEVERITY_PER_MESSAGE ? 'hard' : 'soft';
+    isCritical || violations.length >= HARD_SEVERITY_PER_MESSAGE
+      ? 'hard'
+      : 'soft';
   const hint = getSafetyHint(category);
 
   logger.warn('safety violation', {
@@ -54,8 +58,8 @@ export function checkSafety(
 }
 
 function pickPrimaryCategory(violations: Violation[]): ViolationCategory {
-  // toxic / pressure 가 contact / identity 보다 우선.
-  const order: ViolationCategory[] = ['toxic', 'pressure', 'contact', 'identity'];
+  // critical > harassment > contact 순으로 우선.
+  const order: ViolationCategory[] = ['critical', 'harassment', 'contact'];
   for (const c of order) {
     if (violations.some((v) => v.category === c)) return c;
   }

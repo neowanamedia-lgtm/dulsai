@@ -11,17 +11,24 @@ import type { Database } from '../types/db';
 
 type SmokeTable = keyof Database['public']['Tables'];
 
-const SMOKE_TABLES: ReadonlyArray<SmokeTable> = [
-  'users',
-  'user_profiles',
-  'profile_photos',
-  'posts',
-  'post_comments',
+// 테이블별 기대 접근 정책 — anon 상태(smoke test 시점) 의 정상/비정상 판정에 사용.
+type AccessLevel = 'public' | 'self';
+type SmokeEntry = { name: SmokeTable; access: AccessLevel };
+
+const SMOKE_TABLES: ReadonlyArray<SmokeEntry> = [
+  { name: 'users', access: 'self' },
+  { name: 'user_profiles', access: 'self' },
+  { name: 'profile_photos', access: 'self' },
+  { name: 'posts', access: 'public' },
+  { name: 'post_comments', access: 'public' },
+  { name: 'content_reports', access: 'self' },
+  { name: 'user_blocks', access: 'self' },
 ];
 
 export type SmokeStatus =
   | 'ok'
   | 'rls_blocked'
+  | 'expected_blocked'
   | 'schema_mismatch'
   | 'table_missing'
   | 'unknown';
@@ -43,8 +50,8 @@ export async function runSupabaseSmokeTests(): Promise<SmokeResult[]> {
 
   logger.info('smoke test start', { tables: SMOKE_TABLES.length });
   const results: SmokeResult[] = [];
-  for (const table of SMOKE_TABLES) {
-    results.push(await runOne(table));
+  for (const entry of SMOKE_TABLES) {
+    results.push(await runOne(entry));
   }
 
   const summary = results.reduce<Record<SmokeStatus, number>>(
@@ -55,6 +62,7 @@ export async function runSupabaseSmokeTests(): Promise<SmokeResult[]> {
     {
       ok: 0,
       rls_blocked: 0,
+      expected_blocked: 0,
       schema_mismatch: 0,
       table_missing: 0,
       unknown: 0,
@@ -64,13 +72,14 @@ export async function runSupabaseSmokeTests(): Promise<SmokeResult[]> {
   return results;
 }
 
-async function runOne(table: SmokeTable): Promise<SmokeResult> {
+async function runOne(entry: SmokeEntry): Promise<SmokeResult> {
+  const { name: table, access } = entry;
   try {
-    const { data, error } = await supabase.from(table).select('id').limit(1);
+    const { data, error } = await supabase.from(table).select('*').limit(1);
 
     // 정상: error 가 명확히 비어 있고 data 가 array.
     if (!error && Array.isArray(data)) {
-      logger.info('smoke test ok', { table, rows: data.length });
+      logger.info('smoke test ok', { table, access, rows: data.length });
       return {
         table,
         status: 'ok',
@@ -85,6 +94,13 @@ async function runOne(table: SmokeTable): Promise<SmokeResult> {
     const message = readErrorMessage(error);
 
     if (code === '42501') {
+      // anon 상태에서 self 테이블은 차단이 정상.
+      if (access === 'self') {
+        logger.info('smoke test expected blocked (self table, anon)', {
+          table,
+        });
+        return wrap(table, 'expected_blocked', code, message, error);
+      }
       logger.warn('smoke test blocked by RLS', { table, code, message });
       return wrap(table, 'rls_blocked', code, message, error);
     }
@@ -98,7 +114,6 @@ async function runOne(table: SmokeTable): Promise<SmokeResult> {
     }
 
     // 그 외: error 가 객체이긴 한데 code/message 가 비어있는 케이스 포함.
-    // 단순 warn 으로 끝내지 않고, raw 를 통째로 남긴다.
     logger.error('smoke test unknown error with raw payload', {
       table,
       code,

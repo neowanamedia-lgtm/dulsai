@@ -19,10 +19,12 @@ export function orderUserPair(a: string, b: string): {
 export async function listMyConversations(
   userId: string,
 ): Promise<DbConversation[]> {
+  // status='left' 인 대화방은 양쪽 모두에서 숨김. 추후 user-level leave 도입 시 보강.
   const { data, error } = await supabase
     .from('conversations')
     .select('*')
     .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`)
+    .neq('status', 'left')
     .order('last_message_at', { ascending: false, nullsFirst: false });
   if (error) {
     logger.warn('listMyConversations failed', {
@@ -100,4 +102,28 @@ async function findExistingConversation(pair: {
     return null;
   }
   return data;
+}
+
+// 대화방 나가기 — 서버 측 conversations.status='left' 로 업데이트.
+// 한쪽이 나가면 양쪽 모두 더 이상 조회되지 않는 현재 스키마(status 단일 컬럼) 한계가 있으며,
+// 양쪽이 독립적으로 hide 하려면 별도 conversation_participants 테이블이 필요.
+// 그 구조 마이그레이션 전까지는 이 함수가 "양쪽 모두 종료" 의미로 동작한다.
+// 호출부는 서버 갱신 실패 시에도 클라이언트 로컬 hide(deletedConversationIds) 만으로
+// 사용자 UX 가 깨지지 않도록 fallback 한다.
+export async function leaveConversation(
+  conversationId: string,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('conversations')
+    .update({ status: 'left' })
+    .eq('id', conversationId);
+  if (error) {
+    logger.warn('leaveConversation failed', {
+      conversationId,
+      code: error.code,
+      message: error.message,
+    });
+    return false;
+  }
+  return true;
 }

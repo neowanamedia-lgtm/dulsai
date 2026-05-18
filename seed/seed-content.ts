@@ -43,6 +43,9 @@ export type SeedReply = {
   updatedAt?: string;
   isSample: true;
   conversationInvite?: ConversationInvite;
+  // 실제 사용자가 새 글을 작성한 직후 분위기 보조용으로 자동 생성된 답글.
+  // 대화초대 동작 / 관리 시트 신고 노출 제어에 사용.
+  isAutoSeed?: boolean;
 };
 
 export type SeedPost = {
@@ -55,6 +58,9 @@ export type SeedPost = {
   updatedAt?: string;
   isSample: true;
   replies: SeedReply[];
+  // 이성 간 답글 정책용. seed 항목엔 명시 안 되어 있어도 USER_MAP 으로 추론 가능.
+  // dbPostToSeed 가 서버 row 의 author_gender 를 그대로 옮긴다.
+  authorGender?: 'male' | 'female';
 };
 
 export type SeedConversationStatus = 'active' | 'blocked' | 'closed';
@@ -72,14 +78,9 @@ export type SeedConversation = {
   isSample: true;
 };
 
-export type DisclosureKind = 'region' | 'age' | 'photo' | 'contact';
-export type MessageKind =
-  | 'text'
-  | 'disclosure_request'
-  | 'disclosure_accepted'
-  | 'disclosure_declined'
-  | 'disclosure_info';
-
+// 정보 공개(disclosure) 흐름은 DulSai 의 운영 정책상 시스템 메시지로 노출하지 않는다.
+// SeedMessage 는 일반 사용자 메시지만 표현한다.
+// imageUri 가 있으면 사진 메시지. 원본 비율 보존을 위해 imageWidth/imageHeight 도 함께 저장.
 export type SeedMessage = {
   messageId: string;
   conversationId: string;
@@ -88,8 +89,9 @@ export type SeedMessage = {
   originalContent: string;
   createdAt: string;
   isSample: true;
-  kind?: MessageKind;
-  disclosureKind?: DisclosureKind;
+  imageUri?: string;
+  imageWidth?: number;
+  imageHeight?: number;
 };
 
 export type SeedTranslation = {
@@ -161,6 +163,7 @@ export const SEED_POSTS: SeedPost[] = [
       { replyId: 'r001', userId: 'f_07', originalLanguage: 'ko', originalContent: '단무지 좋아하는 사람들이 들으면 어이없어할 댓글이지만 저도 단무지 빼파라서 격하게 공감합니다.', createdAt: '2026-05-16T15:01:00+09:00', isSample: true },
       { replyId: 'r002', userId: 'm_05', originalLanguage: 'ko', originalContent: '저는 빼달라고 했는데 오히려 두 개 들어있던 적 있어요. 사과의 의미였는지 뭐였는지.', createdAt: '2026-05-16T15:48:00+09:00', isSample: true },
       { replyId: 'r003', userId: 'f_05', originalLanguage: 'ko', originalContent: '그런 게 자꾸 쌓이면 단골 되는 거잖아요. 좋아 보여요.', createdAt: '2026-05-16T17:12:00+09:00', isSample: true, conversationInvite: { inviteId: 'inv_001', userId: 'm_01', originalLanguage: 'ko', originalContent: '그렇게 봐주셔서 고맙습니다. 괜찮다면 이 문장을 계기로 조금 더 천천히 이야기 나눠보고 싶어요.', createdAt: '2026-05-16T19:48:00+09:00', isSample: true, conversationJoin: { joinId: 'jon_001', userId: 'f_05', originalLanguage: 'ko', originalContent: '좋아요. 가볍게라도 천천히 이야기 이어가 봐요.', createdAt: '2026-05-16T22:14:00+09:00', isSample: true } } },
+      { replyId: 'r003a', userId: 'm_01', originalLanguage: 'ko', originalContent: '오늘 다시 갔는데 이번엔 먼저 "단무지 빼드릴까요?" 하시더라고요. 그 한 마디가 좀 좋았어요.', createdAt: '2026-05-17T13:02:00+09:00', isSample: true },
     ],
   },
   {
@@ -175,6 +178,7 @@ export const SEED_POSTS: SeedPost[] = [
       { replyId: 'r004', userId: 'm_06', originalLanguage: 'ko', originalContent: 'ㅋㅋㅋㅋ 저도 매일 합니다 그거. 같은 층에서 내릴 때까지 어색한 게 압권이죠.', createdAt: '2026-05-16T10:14:00+09:00', isSample: true },
       { replyId: 'r005', userId: 'f_03', originalLanguage: 'ko', originalContent: '인사를 받아주신 거 자체가 사회생활 잘하시는 거예요.', createdAt: '2026-05-16T11:02:00+09:00', isSample: true },
       { replyId: 'r006', userId: 'm_02', originalLanguage: 'ko', originalContent: '그분도 분명 머쓱하셨을 거예요. 같이 웃으면서 내리셨길.', createdAt: '2026-05-16T13:25:00+09:00', isSample: true },
+      { replyId: 'r006a', userId: 'f_07', originalLanguage: 'ko', originalContent: '댓글 보고 위로 많이 받았어요. 다음번엔 그냥 같이 웃어드릴 자신감 생겼어요.', createdAt: '2026-05-16T18:40:00+09:00', isSample: true },
     ],
   },
   {
@@ -189,6 +193,7 @@ export const SEED_POSTS: SeedPost[] = [
       { replyId: 'r007', userId: 'm_09', originalLanguage: 'ko', originalContent: '그 5분이 있어야 사람이 굴러갑니다. 다들 비슷할 거예요.', createdAt: '2026-05-15T22:46:00+09:00', isSample: true },
       { replyId: 'r008', userId: 'f_08', originalLanguage: 'ko', originalContent: '화장실이 사실상 회사 안의 유일한 사적 공간이죠.', createdAt: '2026-05-15T23:11:00+09:00', isSample: true },
       { replyId: 'r009', userId: 'm_07', originalLanguage: 'ko', originalContent: '저는 옥상 갑니다. 누가 있으면 그냥 도로 내려와요.', createdAt: '2026-05-16T08:33:00+09:00', isSample: true },
+      { replyId: 'r009a', userId: 'm_08', originalLanguage: 'ko', originalContent: '꽤 많은 분이 비슷한 거 보면 회사 다니는 사람들은 다들 그런 5분이 있나 봐요. 위로가 됩니다.', createdAt: '2026-05-16T20:14:00+09:00', isSample: true },
     ],
   },
   {
@@ -203,6 +208,7 @@ export const SEED_POSTS: SeedPost[] = [
       { replyId: 'r010', userId: 'f_06', originalLanguage: 'ko', originalContent: '그 감각 알 것 같아요. 슬프다고 부르기엔 너무 일상이고.', createdAt: '2026-05-15T20:18:00+09:00', isSample: true },
       { replyId: 'r011', userId: 'm_01', originalLanguage: 'ko', originalContent: '저는 일부러 들어오기 전에 음악 틀어놓고 들어와요. 별거 아닌데 도움이 돼요.', createdAt: '2026-05-15T20:55:00+09:00', isSample: true, conversationInvite: { inviteId: 'inv_002', userId: 'f_01', originalLanguage: 'ko', originalContent: '그 방법, 저도 한번 해보려고요. 괜찮다면 이 문장을 계기로 조금 더 이야기 나눠보고 싶어요.', createdAt: '2026-05-15T23:42:00+09:00', isSample: true } },
       { replyId: 'r012', userId: 'f_10', originalLanguage: 'ko', originalContent: '혼자 사는 게 익숙해진다는 건 그런 순간들에 무뎌지는 거더라고요.', createdAt: '2026-05-15T22:01:00+09:00', isSample: true },
+      { replyId: 'r012a', userId: 'f_01', originalLanguage: 'ko', originalContent: '오늘은 들어오기 전에 음악 틀어봤어요. 별거 아닌데 다른 결의 침묵이 됐어요.', createdAt: '2026-05-16T21:18:00+09:00', isSample: true },
     ],
   },
   {
@@ -217,6 +223,7 @@ export const SEED_POSTS: SeedPost[] = [
       { replyId: 'r013', userId: 'f_09', originalLanguage: 'ko', originalContent: '무리 속에서 외로운 게 진짜 외로움인 것 같아요.', createdAt: '2026-05-15T15:02:00+09:00', isSample: true },
       { replyId: 'r014', userId: 'm_10', originalLanguage: 'ko', originalContent: '그 단톡방을 굳이 안 나가는 이유는 또 뭘까요. 저도 비슷합니다.', createdAt: '2026-05-15T16:37:00+09:00', isSample: true },
       { replyId: 'r015', userId: 'm_05', originalLanguage: 'ko', originalContent: '마지막 줄이 뼈입니다.', createdAt: '2026-05-15T18:10:00+09:00', isSample: true },
+      { replyId: 'r015a', userId: 'm_09', originalLanguage: 'ko', originalContent: '결국 어제 그 단톡방 알림 끄고 잤어요. 의외로 별일 없었어요. 댓글들 덕분에 결정 빨라졌네요.', createdAt: '2026-05-16T09:48:00+09:00', isSample: true },
     ],
   },
   {
@@ -783,6 +790,311 @@ export const SEED_POSTS: SeedPost[] = [
       { replyId: 'r124', userId: 'f_01', originalLanguage: 'ko', originalContent: '불 켜진 집에 들어가는 게 다른 거, 그 표현이 너무 좋아요. 저도 그래서 가끔 그래요.', createdAt: '2026-05-11T08:22:00+09:00', isSample: true },
     ],
   },
+
+  // ──────────────────────────────────────────────────────────
+  // 보강: 기존 부족 카테고리 + 신규 가벼운 카테고리 시드
+  // ──────────────────────────────────────────────────────────
+
+  {
+    postId: 'p047',
+    userId: 'm_03',
+    categoryId: 'lasting-affection',
+    originalLanguage: 'ko',
+    originalContent: '초등학교 운동회 때 빌려 입었던 친구 운동복이 가끔 생각나요. 색깔도 안 맞고 사이즈도 컸는데, 그 친구 얼굴은 흐릿한데 운동복만 또렷합니다.',
+    createdAt: '2026-05-14T18:22:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r125', userId: 'f_06', originalLanguage: 'ko', originalContent: '왜 사람보다 사물이 더 또렷할 때가 있는지 신기해요. 그런 게 진짜 기억일지도.', createdAt: '2026-05-14T19:11:00+09:00', isSample: true },
+      { replyId: 'r126', userId: 'm_05', originalLanguage: 'ko', originalContent: '저는 운동회 자체는 흐릿한데 그날 먹은 김밥 하나만 선명해요. 비슷한 결인 것 같습니다.', createdAt: '2026-05-14T20:35:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p048',
+    userId: 'f_04',
+    categoryId: 'what-matters-in-love',
+    originalLanguage: 'ko',
+    originalContent: '좋아하는 마음만큼이나 상대를 피곤하게 하지 않으려는 거리감도 중요한 것 같아요. 사랑이 부담이 되기 시작하면 그게 사랑인지 슬쩍 의문이 들어요.',
+    createdAt: '2026-05-13T22:18:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r127', userId: 'm_06', originalLanguage: 'ko', originalContent: '거리감을 미덕으로 두는 분이 의외로 적어서, 이 글이 반갑네요.', createdAt: '2026-05-13T23:02:00+09:00', isSample: true },
+      { replyId: 'r128', userId: 'f_08', originalLanguage: 'ko', originalContent: '사랑 안에도 매너가 있다고 가끔 생각해요. 비슷한 말 같아요.', createdAt: '2026-05-14T07:48:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p049',
+    userId: 'm_07',
+    categoryId: 'free-thought',
+    originalLanguage: 'ko',
+    originalContent: '왜 비 오는 날에 갑자기 청소가 하고 싶어질까요. 별일도 아닌데 매년 똑같이 그렇습니다.',
+    createdAt: '2026-05-12T15:40:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r129', userId: 'f_02', originalLanguage: 'ko', originalContent: '저도요. 햇볕 좋은 날엔 그렇게 미루다가, 흐린 날엔 손이 움직여요.', createdAt: '2026-05-12T16:18:00+09:00', isSample: true },
+      { replyId: 'r130', userId: 'm_04', originalLanguage: 'ko', originalContent: '그래서 저희 집은 흐린 날 가장 깨끗합니다.', createdAt: '2026-05-12T18:55:00+09:00', isSample: true },
+    ],
+  },
+
+  // funniest-moment-today
+  {
+    postId: 'p050',
+    userId: 'f_03',
+    categoryId: 'funniest-moment-today',
+    originalLanguage: 'ko',
+    originalContent: '지하철에서 자다가 도착역 안내방송에 깜짝 놀라서 일어났는데, 옆 사람도 같이 깜짝 놀라서 일어났어요. 눈 마주치고 웃으면서 헤어졌습니다. 익명의 동지를 한 명 만든 기분.',
+    createdAt: '2026-05-16T20:42:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r131', userId: 'm_06', originalLanguage: 'ko', originalContent: '둘 다 같은 역에서 자고 있었던 게 더 웃겨요.', createdAt: '2026-05-16T21:14:00+09:00', isSample: true },
+      { replyId: 'r132', userId: 'f_09', originalLanguage: 'ko', originalContent: '그런 거 못 잊죠. 익명의 동지라는 표현이 좋네요.', createdAt: '2026-05-16T22:30:00+09:00', isSample: true },
+      { replyId: 'r133', userId: 'm_02', originalLanguage: 'ko', originalContent: '그분과 단톡방 안 만드신 거 다행입니다.', createdAt: '2026-05-17T08:11:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p051',
+    userId: 'm_04',
+    categoryId: 'funniest-moment-today',
+    originalLanguage: 'ko',
+    originalContent: '오늘 마트에서 카트가 자꾸 왼쪽으로만 굴러가는 거예요. 30분 동안 격투기 했습니다. 결국 카트랑 친해졌어요.',
+    createdAt: '2026-05-16T18:05:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r134', userId: 'f_07', originalLanguage: 'ko', originalContent: '마트 카트는 다 그래요. 신비한 일이죠.', createdAt: '2026-05-16T18:38:00+09:00', isSample: true },
+      { replyId: 'r135', userId: 'm_08', originalLanguage: 'ko', originalContent: '친해졌다는 표현이 너무 귀엽네요.', createdAt: '2026-05-16T19:24:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p052',
+    userId: 'f_06',
+    categoryId: 'funniest-moment-today',
+    originalLanguage: 'ko',
+    originalContent: '화상회의 중에 고양이가 노트북 위로 올라와서 화면을 가렸어요. 다들 회의 멈추고 고양이 보면서 웃었는데, 그게 그날 회의 중 제일 생산적인 시간이었어요.',
+    createdAt: '2026-05-16T11:45:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r136', userId: 'm_07', originalLanguage: 'ko', originalContent: '고양이 등장 = 회의 끝. 자연의 법칙입니다.', createdAt: '2026-05-16T12:18:00+09:00', isSample: true },
+      { replyId: 'r137', userId: 'f_01', originalLanguage: 'ko', originalContent: '회의록에 고양이 이름 적어두셔야 합니다.', createdAt: '2026-05-16T13:02:00+09:00', isSample: true },
+      { replyId: 'r138', userId: 'm_03', originalLanguage: 'ko', originalContent: '그날 회의에서 결정된 거 하나도 없었겠네요.', createdAt: '2026-05-16T14:28:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p053',
+    userId: 'm_05',
+    categoryId: 'funniest-moment-today',
+    originalLanguage: 'ko',
+    originalContent: '점심에 짜장면 시켰는데 단무지 통이 빈 채로 왔어요. 화는 안 났는데 한참을 웃었습니다. 단무지 없는 짜장면이라는 게 좀 슬프고 좀 웃기더라고요.',
+    createdAt: '2026-05-15T13:22:00+09:00',
+    isSample: true,
+    replies: [],
+  },
+
+  // good-mood-today
+  {
+    postId: 'p054',
+    userId: 'f_07',
+    categoryId: 'good-mood-today',
+    originalLanguage: 'ko',
+    originalContent: '출근길 지하철 한 칸에 저랑 어린이 한 명만 있었는데, 그 애가 갑자기 손을 흔들었어요. 이유 없이 받았는데, 그게 하루 종일 같이 다녔어요.',
+    createdAt: '2026-05-16T08:34:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r139', userId: 'f_05', originalLanguage: 'ko', originalContent: '그런 인사에 답해주는 사람도 다정해요.', createdAt: '2026-05-16T09:18:00+09:00', isSample: true },
+      { replyId: 'r140', userId: 'm_09', originalLanguage: 'ko', originalContent: '어린이들은 이유 없이 하루를 살려놔요.', createdAt: '2026-05-16T10:45:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p055',
+    userId: 'm_06',
+    categoryId: 'good-mood-today',
+    originalLanguage: 'ko',
+    originalContent: '오늘 동생이 갑자기 "형 옷 잘 어울리네" 한마디 했어요. 별거 아닌데 하루 종일 기분이 좋았어요. 가족 칭찬은 왜 이렇게 무게가 다른지.',
+    createdAt: '2026-05-16T07:12:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r141', userId: 'm_02', originalLanguage: 'ko', originalContent: '형제 칭찬은 평생에 두세 번이라 그만큼 무게가 다른 것 같아요.', createdAt: '2026-05-16T08:02:00+09:00', isSample: true },
+      { replyId: 'r142', userId: 'f_08', originalLanguage: 'ko', originalContent: '동생분이 무슨 부탁이 있는지 의심해 봐야겠는데요.', createdAt: '2026-05-16T09:24:00+09:00', isSample: true },
+      { replyId: 'r143', userId: 'm_10', originalLanguage: 'ko', originalContent: '그 한마디 듣자고 우리는 옷을 골라 입나 봅니다.', createdAt: '2026-05-16T11:38:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p056',
+    userId: 'f_02',
+    categoryId: 'good-mood-today',
+    originalLanguage: 'ko',
+    originalContent: '카페에서 주문한 음료가 잘못 나왔는데, 사장님이 "저 그냥 마실게요" 하시면서 본인이 마시고 새로 만들어 주셨어요. 그 작은 장면이 하루를 가볍게 해줬어요.',
+    createdAt: '2026-05-15T15:48:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r144', userId: 'f_10', originalLanguage: 'ko', originalContent: '사장님 같은 분 진짜 귀하네요.', createdAt: '2026-05-15T16:22:00+09:00', isSample: true },
+      { replyId: 'r145', userId: 'm_04', originalLanguage: 'ko', originalContent: '그런 분 가게는 단골 안 될 수가 없습니다.', createdAt: '2026-05-15T18:05:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p057',
+    userId: 'm_03',
+    categoryId: 'good-mood-today',
+    originalLanguage: 'ko',
+    originalContent: '퇴근하고 집 앞에서 길고양이가 저 알아보고 다가왔어요. 며칠 밥 좀 줬다고. 별거 아닌 거 같은데 누가 알아본다는 게 따뜻하더라고요.',
+    createdAt: '2026-05-15T19:30:00+09:00',
+    isSample: true,
+    replies: [],
+  },
+
+  // small-mishap-today
+  {
+    postId: 'p058',
+    userId: 'm_09',
+    categoryId: 'small-mishap-today',
+    originalLanguage: 'ko',
+    originalContent: '오늘 분명히 우산 챙겨 나왔는데, 비 그치고 나니까 어디 두고 왔는지 기억이 안 나요. 비 올 때보다 안 올 때 우산 잃어버리는 게 더 어이없습니다.',
+    createdAt: '2026-05-16T17:48:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r146', userId: 'm_05', originalLanguage: 'ko', originalContent: '비 그치면 우산이 손에서 사라지는 마법, 다들 한 번씩 겪죠.', createdAt: '2026-05-16T18:14:00+09:00', isSample: true },
+      { replyId: 'r147', userId: 'f_06', originalLanguage: 'ko', originalContent: '저는 우산이 잃어버리려고 만들어진 줄 알고 있습니다.', createdAt: '2026-05-16T19:35:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p059',
+    userId: 'f_01',
+    categoryId: 'small-mishap-today',
+    originalLanguage: 'ko',
+    originalContent: '출근 준비 다 하고 신발 신었는데 양말 짝짝이로 신은 걸 발견했어요. 시간 없어서 그냥 출근했고, 하루 종일 들킬까봐 다리 꼬고 앉아 있었습니다.',
+    createdAt: '2026-05-16T09:08:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r148', userId: 'f_03', originalLanguage: 'ko', originalContent: '들켜도 귀엽다고 넘어가 줘요 사람들.', createdAt: '2026-05-16T10:02:00+09:00', isSample: true },
+      { replyId: 'r149', userId: 'm_08', originalLanguage: 'ko', originalContent: '다리 꼬고 앉아 있는 그 자세가 오히려 더 의심받았을지도요.', createdAt: '2026-05-16T11:18:00+09:00', isSample: true },
+      { replyId: 'r150', userId: 'f_09', originalLanguage: 'ko', originalContent: '양말 짝짝이는 그냥 패션이라고 우깁시다.', createdAt: '2026-05-16T13:45:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p060',
+    userId: 'm_10',
+    categoryId: 'small-mishap-today',
+    originalLanguage: 'ko',
+    originalContent: '엘리베이터에서 옆 사람한테 내릴 때 가볍게 인사했는데, 그게 너무 어색해서 둘 다 살짝 머쓱했어요. 그냥 가만히 있었어도 됐을 텐데 말이죠.',
+    createdAt: '2026-05-15T20:14:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r151', userId: 'm_07', originalLanguage: 'ko', originalContent: '그런 어색함은 며칠 가요. 저도 그런 적 있는데 일주일 동안 떠올랐습니다.', createdAt: '2026-05-15T20:48:00+09:00', isSample: true },
+      { replyId: 'r152', userId: 'f_07', originalLanguage: 'ko', originalContent: '옆 사람도 똑같이 며칠 떠올렸을 거예요. 어색함은 서로의 몫.', createdAt: '2026-05-15T22:12:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p061',
+    userId: 'f_04',
+    categoryId: 'small-mishap-today',
+    originalLanguage: 'ko',
+    originalContent: '오늘 아침에 텀블러 챙겨 나왔는데, 회사 도착해서 보니까 뚜껑이 안 닫혀 있어서 가방 속이 커피로 절여졌어요. 노트북은 살았으니 다행으로 칩니다.',
+    createdAt: '2026-05-15T10:36:00+09:00',
+    isSample: true,
+    replies: [],
+  },
+
+  // unexpected-buoyancy
+  {
+    postId: 'p062',
+    userId: 'm_02',
+    categoryId: 'unexpected-buoyancy',
+    originalLanguage: 'ko',
+    originalContent: '오늘 따라 괜히 길이 짧게 느껴졌어요. 같은 출근길인데 평소보다 빨리 도착한 느낌. 이유는 모르겠지만 그냥 좀 들떠 있었던 것 같아요.',
+    createdAt: '2026-05-16T08:55:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r153', userId: 'm_05', originalLanguage: 'ko', originalContent: '그런 날 있어요. 같은 길이 다르게 보일 때.', createdAt: '2026-05-16T09:32:00+09:00', isSample: true },
+      { replyId: 'r154', userId: 'f_05', originalLanguage: 'ko', originalContent: '발걸음에 마음이 묻어요. 가벼운 날엔 길도 짧아지는 것 같아요.', createdAt: '2026-05-16T10:48:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p063',
+    userId: 'f_03',
+    categoryId: 'unexpected-buoyancy',
+    originalLanguage: 'ko',
+    originalContent: '괜히 오늘은 평소에 잘 안 입던 옷을 꺼내 입었어요. 이유는 모르겠는데 옷장 앞에서 잠깐 망설이다 골라낸 옷이에요. 거울 보고 한 번 웃었습니다.',
+    createdAt: '2026-05-15T07:22:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r155', userId: 'f_02', originalLanguage: 'ko', originalContent: '그 한 번의 웃음이 하루를 만들어요.', createdAt: '2026-05-15T08:05:00+09:00', isSample: true },
+      { replyId: 'r156', userId: 'm_06', originalLanguage: 'ko', originalContent: '옷장이 가끔 자기 마음대로 옷을 골라주는 날 있죠.', createdAt: '2026-05-15T09:38:00+09:00', isSample: true },
+      { replyId: 'r157', userId: 'f_08', originalLanguage: 'ko', originalContent: '잘 안 입는 옷에 손이 가는 날은 뭔가 좋은 일이 생길 거 같다고 저는 생각해요.', createdAt: '2026-05-15T11:24:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p064',
+    userId: 'm_07',
+    categoryId: 'unexpected-buoyancy',
+    originalLanguage: 'ko',
+    originalContent: '오늘 점심 메뉴를 고민도 안 했어요. 머릿속에 비빔국수가 그냥 떠올라 있었고, 가서 먹었고, 행복했어요. 결정 안 해도 되는 점심이 가끔 가장 좋아요.',
+    createdAt: '2026-05-14T12:48:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r158', userId: 'm_09', originalLanguage: 'ko', originalContent: '선택지가 없는 점심이 가장 평화로워요.', createdAt: '2026-05-14T13:22:00+09:00', isSample: true },
+      { replyId: 'r159', userId: 'f_10', originalLanguage: 'ko', originalContent: '비빔국수, 그날의 정답이 따로 있는 거 같아요.', createdAt: '2026-05-14T14:55:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p065',
+    userId: 'f_06',
+    categoryId: 'unexpected-buoyancy',
+    originalLanguage: 'ko',
+    originalContent: '오후에 갑자기 카페 들어가서 디저트 하나 시켰어요. 평소엔 안 먹는데 오늘은 왠지 그래야 할 것 같아서. 별거 아니었지만 그 시간 동안 마음이 가벼웠어요.',
+    createdAt: '2026-05-13T15:30:00+09:00',
+    isSample: true,
+    replies: [],
+  },
+
+  // only-me-moment
+  {
+    postId: 'p066',
+    userId: 'f_08',
+    categoryId: 'only-me-moment',
+    originalLanguage: 'ko',
+    originalContent: '전자레인지 돌리고 나면 꼭 마지막 1초 남았을 때 직접 열어요. 안 그러면 띵 소리에 깜짝 놀라서요. 나만 이러는 건가 싶었는데 친구도 그런대요.',
+    createdAt: '2026-05-16T19:18:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r160', userId: 'f_07', originalLanguage: 'ko', originalContent: '저도요! 1초 전 미션. 이거 동지가 많을 거예요.', createdAt: '2026-05-16T19:52:00+09:00', isSample: true },
+      { replyId: 'r161', userId: 'm_03', originalLanguage: 'ko', originalContent: '저는 띵 소리 듣기 전에 못 빼면 음식이 마음에 안 들어요. 비슷한가요.', createdAt: '2026-05-16T21:14:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p067',
+    userId: 'm_06',
+    categoryId: 'only-me-moment',
+    originalLanguage: 'ko',
+    originalContent: '샴푸랑 린스 통이 비슷하게 생겨서 매번 헷갈려요. 어두운 곳에서 만져만 보고 구분하는 능력이 생겼는데, 이게 다행인지 모르겠어요.',
+    createdAt: '2026-05-15T22:42:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r162', userId: 'm_08', originalLanguage: 'ko', originalContent: '그 능력은 인생의 잉여 스킬 중 하나입니다.', createdAt: '2026-05-15T23:18:00+09:00', isSample: true },
+      { replyId: 'r163', userId: 'f_01', originalLanguage: 'ko', originalContent: '통 자체를 다르게 사면 되는데 왜 우리는 매번 같은 디자인을 사는 걸까요.', createdAt: '2026-05-16T08:02:00+09:00', isSample: true },
+      { replyId: 'r164', userId: 'f_05', originalLanguage: 'ko', originalContent: '어두운 곳에서 손끝으로 사는 우리, 의외로 많아요.', createdAt: '2026-05-16T10:48:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p068',
+    userId: 'f_10',
+    categoryId: 'only-me-moment',
+    originalLanguage: 'ko',
+    originalContent: '이불 정리할 때 항상 모서리부터 맞춰요. 다른 데부터 하면 마음이 불편해서 못 견디겠어요. 강박인가 싶다가도, 정리는 잘 되니까 그냥 둡니다.',
+    createdAt: '2026-05-14T07:55:00+09:00',
+    isSample: true,
+    replies: [
+      { replyId: 'r165', userId: 'm_10', originalLanguage: 'ko', originalContent: '정리하시는 분의 미덕이라고 생각하시면 됩니다.', createdAt: '2026-05-14T08:32:00+09:00', isSample: true },
+      { replyId: 'r166', userId: 'f_09', originalLanguage: 'ko', originalContent: '저는 반대로 모서리는 끝까지 안 맞춰요. 다양한 우리.', createdAt: '2026-05-14T10:14:00+09:00', isSample: true },
+    ],
+  },
+  {
+    postId: 'p069',
+    userId: 'm_04',
+    categoryId: 'only-me-moment',
+    originalLanguage: 'ko',
+    originalContent: '엘리베이터에서 버튼 누르고 나서 닫힘 버튼을 또 한 번 더 눌러요. 안 누르면 시간이 너무 길게 느껴져서요. 나만 그러는 줄 알았는데 친구도 그러더라고요.',
+    createdAt: '2026-05-13T18:30:00+09:00',
+    isSample: true,
+    replies: [],
+  },
 ];
 
 export const SEED_TRANSLATIONS: SeedTranslation[] = [
@@ -836,36 +1148,28 @@ export const SEED_MESSAGES: SeedMessage[] = [
   { messageId: 'msg_009', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '그렇게 봐주셔서 좋아요. 글 결이 잘 맞는 사람과 이야기하는 게 드문 일이에요.', createdAt: '2026-05-14T20:42:00+09:00', isSample: true },
   { messageId: 'msg_010', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '맞아요. 그래서 너무 서두르고 싶지 않아요. 천천히 가요.', createdAt: '2026-05-15T08:33:00+09:00', isSample: true },
 
-  { messageId: 'msg_011', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '괜찮다면 서로 지역을 슬쩍 열어볼까요?', createdAt: '2026-05-17T10:14:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'region' },
-  { messageId: 'msg_012', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '좋아요. 천천히 알아가는 거니까요.', createdAt: '2026-05-17T10:35:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'region' },
-  { messageId: 'msg_013', conversationId: 'conv_001', senderId: 'system', originalLanguage: 'ko', originalContent: '지역이 서로에게 열렸어요.', createdAt: '2026-05-17T10:35:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'region' },
+  { messageId: 'msg_011', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '괜찮다면 서로 지역을 슬쩍 열어볼까요?', createdAt: '2026-05-17T10:14:00+09:00', isSample: true },
+  { messageId: 'msg_012', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '좋아요. 천천히 알아가는 거니까요.', createdAt: '2026-05-17T10:35:00+09:00', isSample: true },
   { messageId: 'msg_014', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '꽤 가까운 동네라 신기했어요.', createdAt: '2026-05-17T13:22:00+09:00', isSample: true },
   { messageId: 'msg_015', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '저도요. 의외인 게 의외로 가까이 있더라고요.', createdAt: '2026-05-17T14:08:00+09:00', isSample: true },
-  { messageId: 'msg_016', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '괜찮으면 나이도 같이 알려줄까요?', createdAt: '2026-05-17T18:42:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'age' },
-  { messageId: 'msg_017', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '그렇게 해요.', createdAt: '2026-05-17T19:18:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'age' },
-  { messageId: 'msg_018', conversationId: 'conv_001', senderId: 'system', originalLanguage: 'ko', originalContent: '나이가 서로에게 열렸어요.', createdAt: '2026-05-17T19:18:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'age' },
+  { messageId: 'msg_016', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '괜찮으면 나이도 같이 알려줄까요?', createdAt: '2026-05-17T18:42:00+09:00', isSample: true },
+  { messageId: 'msg_017', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '그렇게 해요.', createdAt: '2026-05-17T19:18:00+09:00', isSample: true },
   { messageId: 'msg_019', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '비슷한 또래라 더 편한 느낌이에요.', createdAt: '2026-05-17T21:48:00+09:00', isSample: true },
-  { messageId: 'msg_020', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '사진도 공유해볼까요?', createdAt: '2026-05-18T09:22:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'photo' },
-  { messageId: 'msg_021', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '좋아요. 부담스럽지 않게요.', createdAt: '2026-05-18T11:35:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'photo' },
-  { messageId: 'msg_022', conversationId: 'conv_001', senderId: 'system', originalLanguage: 'ko', originalContent: '사진이 서로에게 열렸어요.', createdAt: '2026-05-18T11:35:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'photo' },
+  { messageId: 'msg_020', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '사진도 공유해볼까요?', createdAt: '2026-05-18T09:22:00+09:00', isSample: true },
+  { messageId: 'msg_021', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '좋아요. 부담스럽지 않게요.', createdAt: '2026-05-18T11:35:00+09:00', isSample: true },
   { messageId: 'msg_023', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '사진 보고 더 편해진 것 같아요.', createdAt: '2026-05-18T14:48:00+09:00', isSample: true },
-  { messageId: 'msg_024', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '이제 연락처도 알려줄 수 있을까요?', createdAt: '2026-05-18T20:14:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'contact' },
-  { messageId: 'msg_025', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '좋아요. 천천히 시작해 봐요.', createdAt: '2026-05-18T22:38:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'contact' },
-  { messageId: 'msg_026', conversationId: 'conv_001', senderId: 'system', originalLanguage: 'ko', originalContent: '연락처가 서로에게 열렸어요.', createdAt: '2026-05-18T22:38:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'contact' },
+  { messageId: 'msg_024', conversationId: 'conv_001', senderId: 'm_01', originalLanguage: 'ko', originalContent: '이제 연락처도 알려줄 수 있을까요?', createdAt: '2026-05-18T20:14:00+09:00', isSample: true },
+  { messageId: 'msg_025', conversationId: 'conv_001', senderId: 'f_05', originalLanguage: 'ko', originalContent: '좋아요. 천천히 시작해 봐요.', createdAt: '2026-05-18T22:38:00+09:00', isSample: true },
 
-  { messageId: 'msg_027', conversationId: 'conv_002', senderId: 'f_06', originalLanguage: 'ko', originalContent: '괜찮다면 지역도 슬쩍 열어볼까요?', createdAt: '2026-05-13T20:08:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'region' },
-  { messageId: 'msg_028', conversationId: 'conv_002', senderId: 'm_01', originalLanguage: 'ko', originalContent: '좋아요. 가까운 곳이면 좋겠네요.', createdAt: '2026-05-13T22:14:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'region' },
-  { messageId: 'msg_029', conversationId: 'conv_002', senderId: 'system', originalLanguage: 'ko', originalContent: '지역이 서로에게 열렸어요.', createdAt: '2026-05-13T22:14:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'region' },
-  { messageId: 'msg_030', conversationId: 'conv_002', senderId: 'f_06', originalLanguage: 'ko', originalContent: '괜찮다면 나이도 같이 알려줄까요?', createdAt: '2026-05-14T08:42:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'age' },
-  { messageId: 'msg_031', conversationId: 'conv_002', senderId: 'm_01', originalLanguage: 'ko', originalContent: '조금 더 천천히 알아가고 싶어요.', createdAt: '2026-05-14T10:18:00+09:00', isSample: true, kind: 'disclosure_declined', disclosureKind: 'age' },
+  { messageId: 'msg_027', conversationId: 'conv_002', senderId: 'f_06', originalLanguage: 'ko', originalContent: '괜찮다면 지역도 슬쩍 열어볼까요?', createdAt: '2026-05-13T20:08:00+09:00', isSample: true },
+  { messageId: 'msg_028', conversationId: 'conv_002', senderId: 'm_01', originalLanguage: 'ko', originalContent: '좋아요. 가까운 곳이면 좋겠네요.', createdAt: '2026-05-13T22:14:00+09:00', isSample: true },
+  { messageId: 'msg_030', conversationId: 'conv_002', senderId: 'f_06', originalLanguage: 'ko', originalContent: '괜찮다면 나이도 같이 알려줄까요?', createdAt: '2026-05-14T08:42:00+09:00', isSample: true },
+  { messageId: 'msg_031', conversationId: 'conv_002', senderId: 'm_01', originalLanguage: 'ko', originalContent: '조금 더 천천히 알아가고 싶어요.', createdAt: '2026-05-14T10:18:00+09:00', isSample: true },
 
-  { messageId: 'msg_032', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '괜찮다면 서로 지역을 슬쩍 열어볼까요?', createdAt: '2026-05-15T11:22:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'region' },
-  { messageId: 'msg_033', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '좋아요.', createdAt: '2026-05-15T13:48:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'region' },
-  { messageId: 'msg_034', conversationId: 'conv_003', senderId: 'system', originalLanguage: 'ko', originalContent: '지역이 서로에게 열렸어요.', createdAt: '2026-05-15T13:48:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'region' },
-  { messageId: 'msg_035', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '나이도 같이 알려줄까요?', createdAt: '2026-05-15T17:22:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'age' },
-  { messageId: 'msg_036', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '그러죠.', createdAt: '2026-05-15T19:08:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'age' },
-  { messageId: 'msg_037', conversationId: 'conv_003', senderId: 'system', originalLanguage: 'ko', originalContent: '나이가 서로에게 열렸어요.', createdAt: '2026-05-15T19:08:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'age' },
-  { messageId: 'msg_038', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '이제 사진도 공유해볼까요?', createdAt: '2026-05-16T11:22:00+09:00', isSample: true, kind: 'disclosure_request', disclosureKind: 'photo' },
-  { messageId: 'msg_039', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '좋아요. 천천히요.', createdAt: '2026-05-16T14:48:00+09:00', isSample: true, kind: 'disclosure_accepted', disclosureKind: 'photo' },
-  { messageId: 'msg_040', conversationId: 'conv_003', senderId: 'system', originalLanguage: 'ko', originalContent: '사진이 서로에게 열렸어요.', createdAt: '2026-05-16T14:48:02+09:00', isSample: true, kind: 'disclosure_info', disclosureKind: 'photo' },
+  { messageId: 'msg_032', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '괜찮다면 서로 지역을 슬쩍 열어볼까요?', createdAt: '2026-05-15T11:22:00+09:00', isSample: true },
+  { messageId: 'msg_033', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '좋아요.', createdAt: '2026-05-15T13:48:00+09:00', isSample: true },
+  { messageId: 'msg_035', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '나이도 같이 알려줄까요?', createdAt: '2026-05-15T17:22:00+09:00', isSample: true },
+  { messageId: 'msg_036', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '그러죠.', createdAt: '2026-05-15T19:08:00+09:00', isSample: true },
+  { messageId: 'msg_038', conversationId: 'conv_003', senderId: 'm_02', originalLanguage: 'ko', originalContent: '이제 사진도 공유해볼까요?', createdAt: '2026-05-16T11:22:00+09:00', isSample: true },
+  { messageId: 'msg_039', conversationId: 'conv_003', senderId: 'f_06', originalLanguage: 'ko', originalContent: '좋아요. 천천히요.', createdAt: '2026-05-16T14:48:00+09:00', isSample: true },
 ];

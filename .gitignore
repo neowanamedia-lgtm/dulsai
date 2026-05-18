@@ -35,6 +35,9 @@ yarn-error.*
 .env.local
 .env*.local
 
+# Apple Sign In private key (AuthKey_*.p8 는 위 *.p8 로 이미 차단되지만 명시)
+AuthKey_*
+
 # typescript
 *.tsbuildinfo
 

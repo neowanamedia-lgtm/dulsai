@@ -8,7 +8,12 @@
       "PowerShell(npx expo install expo-image-picker 2>&1 | Select-Object -Last 15)",
       "Bash(npx tsc *)",
       "Bash(npx expo *)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(python -c \"from PIL import Image; print\\('PIL ok'\\)\")",
+      "Bash(python *)",
+      "Bash(npx eas-cli *)",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }

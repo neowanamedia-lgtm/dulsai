@@ -8,3 +8,9 @@ sb_publishable_X9iVoQ8iKqbEsJYp3yAJPA_l55XanpP
 
 URL
 https://hqagnvsxwxxxpfyxnenw.supabase.co
+
+
+
+
+https://resend.com/api-keys?new=true
+re_TAyLyupZ_6WyfjnLqJsmGGc4VLuURJJU8
